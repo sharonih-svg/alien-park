@@ -145,17 +145,68 @@
   }
   .touch-btn-jump.active { background: rgba(250,204,21,0.55); border-color: #facc15; }
 
+  /* ===== DIRECT TOUCH HINT ===== */
+  #touch-hint {
+    display: none;
+    position: fixed; bottom: 26px; left: 0; right: 0;
+    text-align: center; z-index: 120; pointer-events: none;
+    font-family: 'Fredoka', 'Trebuchet MS', sans-serif; font-weight: 600;
+    font-size: 0.95rem; color: white;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.55);
+    transition: opacity 0.8s ease;
+  }
+  #touch-hint.show { display: block; opacity: 1; }
+  #touch-hint.fade { opacity: 0; }
+
   @media (max-width: 900px), (pointer: coarse) {
     .game-title { font-size: 2.4rem; }
     .game-subtitle { font-size: 1.1rem; }
     .gameover-title { font-size: 2.6rem; }
     .gameover-score { font-size: 2.4rem; }
-    #score-display { font-size: 1.4rem; }
     .controls-hint { display: none; }
     .bottom-controls { display: none; }
     .game-instructions { font-size: 0.75rem; }
-    #touch-controls { display: block; }
-    #game-canvas { border-radius: 8px; border-width: 2px; }
+    #touch-controls { display: none; }
+    #game-canvas { border: none; border-radius: 0; box-shadow: none; }
+    /* full-bleed playfield with the HUD floating on top of it */
+    #playing-ui { position: fixed; top: 0; left: 0; right: 0; bottom: 0; justify-content: center; }
+    #score-display {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 60; margin: 0; font-size: 1.05rem; gap: 8px;
+      background: rgba(0,0,0,0.3); padding: 5px 18px; border-radius: 999px;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #score-display .star-icon { font-size: 1rem; }
+  }
+
+  /* ===== ROTATE YOUR DEVICE ===== */
+  #rotate-screen {
+    display: none;
+    position: fixed; inset: 0; z-index: 500;
+    background: linear-gradient(180deg, #0ea5e9 0%, #38bdf8 45%, #7dd3fc 100%);
+    flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    font-family: 'Fredoka', 'Trebuchet MS', sans-serif; color: white;
+  }
+  #rotate-screen.show { display: flex; }
+  .rotate-icon {
+    font-size: 4.5rem; margin-bottom: 18px;
+    animation: rotate-tilt 2s ease-in-out infinite;
+  }
+  @keyframes rotate-tilt {
+    0%, 25% { transform: rotate(0deg); }
+    55%, 85% { transform: rotate(-90deg); }
+    100% { transform: rotate(0deg); }
+  }
+  .rotate-title {
+    font-family: 'Bungee', Impact, sans-serif; font-size: 1.5rem;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.2); margin-bottom: 8px;
+  }
+  .rotate-sub { font-size: 1rem; opacity: 0.9; margin-bottom: 26px; }
+  .rotate-anyway {
+    background: rgba(255,255,255,0.22); border: 2px solid rgba(255,255,255,0.6);
+    color: white; font-family: 'Fredoka', sans-serif; font-weight: 600;
+    font-size: 0.95rem; padding: 10px 26px; border-radius: 999px; cursor: pointer;
   }
   @media (max-width: 500px) {
     .game-title { font-size: 1.8rem; }
@@ -174,7 +225,7 @@
     <svg class="alien-preview" width="120" height="120" viewBox="-60 -70 120 140" id="preview-svg"></svg>
     <div class="game-title">ALIEN PARK</div>
     <div class="game-subtitle">⭐ !ההרפתקה של דוידי ⭐</div>
-    <div class="game-instructions">חצים לזוז ולקפוץ • רווח לירות</div>
+    <div class="game-instructions" id="game-instructions">חצים לזוז ולקפוץ • רווח לירות</div>
     <button class="game-btn btn-green" id="start-btn">▶ START GAME</button>
     <div class="bottom-controls">
       <span>←→ תזוזה</span><span>↑ קפיצה</span><span>רווח ירייה</span>
@@ -207,7 +258,7 @@
       <span>←→ תזוזה</span><span>↑ קפיצה</span><span>רווח ירייה</span>
     </div>
   </div>
-  <div id="touch-controls" dir="ltr">
+  <div id="touch-controls" dir="ltr" style="display:none">
     <div class="touch-area-left">
       <button class="touch-btn" id="btn-left">◀</button>
       <button class="touch-btn" id="btn-right">▶</button>
@@ -217,10 +268,18 @@
       <button class="touch-btn touch-btn-jump" id="btn-jump">⬆</button>
     </div>
   </div>
+  <div id="touch-hint">גררו את האצבע כדי לזוז · הקישו כדי לקפוץ</div>
+  <div id="rotate-screen">
+    <div class="rotate-icon">📱</div>
+    <div class="rotate-title">סובבו את המכשיר</div>
+    <div class="rotate-sub">המשחק בנוי למסך רחב 🛸</div>
+    <button class="rotate-anyway" id="rotate-anyway">בכל זאת לשחק ככה</button>
+  </div>
 </div>
 <script>
 (() => {
-  const GW = 800, GH = 500, GROUND_Y = 400;
+  let GW = 800;
+  const GH = 500, GROUND_Y = 400;
   const GRAVITY = 0.55, JUMP_FORCE = -14, MOVE_SPEED = 5.5, LASER_SPEED = 12;
   const AIR_MOVE_SPEED = 6.5; // faster horizontal movement in air for arc jumps
   const EC = [
@@ -252,6 +311,16 @@
   const playingUI = document.getElementById("playing-ui");
   const container = document.getElementById("game-container");
   const touchControls = document.getElementById("touch-controls");
+  const touchHint = document.getElementById("touch-hint");
+  let hintTimer = null;
+  function showTouchHint() {
+    clearTimeout(hintTimer);
+    touchHint.className = "show";
+    hintTimer = setTimeout(() => {
+      touchHint.className = "show fade";
+      hintTimer = setTimeout(() => { touchHint.className = ""; }, 900);
+    }, 3500);
+  }
 
   // Preview alien
   document.getElementById("preview-svg").innerHTML = `
@@ -294,6 +363,10 @@
   const LEVEL4_SCORE = 450;
   const BOSS_HP = 5;
   const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  if (isMobile) {
+    const gi = document.getElementById("game-instructions");
+    if (gi) gi.textContent = "גררו את האצבע לזוז • הקישו לקפוץ • הירי אוטומטי";
+  }
 
   function initState() {
     player = { x: 200, y: GROUND_Y, vy: 0, right: true, ground: true };
@@ -380,7 +453,9 @@
     gameoverScreen.style.display = s === "gameover" ? "flex" : "none";
     playingUI.style.display = s === "playing" ? "flex" : "none";
     container.className = s === "start" ? "start-bg" : s === "gameover" ? "gameover-bg" : "sky-bg";
-    touchControls.style.display = (isMobile && s === "playing") ? "block" : "none";
+    touchControls.style.display = "none";
+    if (isMobile && s === "playing") showTouchHint();
+    else touchHint.className = "";
     hitOverlay.style.display = "none";
     hitPause = false;
   }
@@ -528,6 +603,79 @@
   setupTouch("btn-right", "ArrowRight");
   setupTouch("btn-jump", "ArrowUp");
   setupTouch("btn-shoot", " ", () => { if (state === "playing") shootLaser(); });
+
+  // ===== Direct finger controls (mobile) =====
+  // Drag anywhere on the game to steer the alien toward your finger.
+  // A quick tap, or a flick upward, makes it jump. Shooting is automatic.
+  let steerId = null;          // identifier of the finger currently steering
+  let steerX = null;           // that finger's X, in game coordinates
+  let tapStartTime = 0, tapStartX = 0, tapStartY = 0, tapMoved = false, tapJumped = false;
+
+  function toGameCoords(t) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (t.clientX - rect.left) * (GW / rect.width),
+      y: (t.clientY - rect.top) * (GH / rect.height)
+    };
+  }
+  function inShopButton(g) {
+    return g.x > 10 && g.x < 60 && g.y > GH - 28 && g.y < GH - 6;
+  }
+  function triggerJump() {
+    keys["ArrowUp"] = true;
+    setTimeout(() => { keys["ArrowUp"] = false; }, 130);
+  }
+  function releaseSteering() {
+    steerId = null; steerX = null;
+    keys["ArrowLeft"] = false; keys["ArrowRight"] = false;
+  }
+
+  canvas.addEventListener("touchstart", e => {
+    if (state !== "playing" || shopOpen) return;
+    const t = e.changedTouches[0];
+    const g = toGameCoords(t);
+    if (inShopButton(g)) return;      // let the shop button do its job
+    e.preventDefault();
+    steerId = t.identifier;
+    steerX = g.x;
+    tapStartTime = Date.now();
+    tapStartX = t.clientX; tapStartY = t.clientY;
+    tapMoved = false; tapJumped = false;
+  }, { passive: false });
+
+  canvas.addEventListener("touchmove", e => {
+    if (steerId === null) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== steerId) continue;
+      e.preventDefault();
+      steerX = toGameCoords(t).x;
+      const dx = t.clientX - tapStartX, dy = t.clientY - tapStartY;
+      if (Math.abs(dx) > 12 || Math.abs(dy) > 12) tapMoved = true;
+      // flick upward = jump
+      if (!tapJumped && dy < -45 && Math.abs(dy) > Math.abs(dx)) {
+        tapJumped = true;
+        triggerJump();
+      }
+    }
+  }, { passive: false });
+
+  function endSteerTouch(e) {
+    if (steerId === null) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== steerId) continue;
+      // short tap that barely moved = jump
+      if (!tapMoved && !tapJumped && Date.now() - tapStartTime < 260) triggerJump();
+      releaseSteering();
+    }
+  }
+  canvas.addEventListener("touchend", endSteerTouch, { passive: true });
+  canvas.addEventListener("touchcancel", endSteerTouch, { passive: true });
+
+  // A second finger anywhere on the game also jumps — handy while steering
+  canvas.addEventListener("touchstart", e => {
+    if (state !== "playing" || shopOpen) return;
+    if (e.touches.length > 1) triggerJump();
+  }, { passive: true });
 
   // Drawing helpers
   function dC(x,y,r,f,a) { ctx.globalAlpha=a??1; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle=f; ctx.fill(); ctx.globalAlpha=1; }
@@ -1228,6 +1376,12 @@
     const baseSpd = shopItems.speedBoost.bought ? MOVE_SPEED * 1.4 : MOVE_SPEED;
     const baseAir = shopItems.speedBoost.bought ? AIR_MOVE_SPEED * 1.3 : AIR_MOVE_SPEED;
     const spd = p.ground ? baseSpd : baseAir;
+    // Finger steering: walk toward wherever the finger is, with a small dead zone
+    if (steerX !== null && !shopOpen) {
+      const diff = steerX - (p.x - cameraX);
+      keys["ArrowRight"] = diff > 16;
+      keys["ArrowLeft"] = diff < -16;
+    }
     if (keys["ArrowLeft"]) { p.x -= spd; p.right = false; }
     if (keys["ArrowRight"]) { p.x += spd; p.right = true; }
     // Apply super jump if bought
@@ -1268,8 +1422,8 @@
 
     const psx = p.x - cameraX; // player screen x
 
-    // Mobile auto-fire
-    if (keys[" "] && state === "playing") {
+    // Mobile auto-fire — on touch devices the alien shoots by itself
+    if ((keys[" "] || isMobile) && state === "playing" && !shopOpen) {
       shootCooldown++;
       if (shootCooldown >= 14) { shootCooldown = 0; shootLaser(); }
     } else { shootCooldown = 0; }
@@ -1702,15 +1856,40 @@
     requestAnimationFrame(gameLoop);
   }
 
-  // Resize canvas for mobile
+  // Resize canvas — on touch devices the playfield fills the whole screen
+  let rotateDismissed = false;
+  const rotateScreen = document.getElementById("rotate-screen");
+  document.getElementById("rotate-anyway").addEventListener("click", () => {
+    rotateDismissed = true;
+    rotateScreen.classList.remove("show");
+    resizeCanvas();
+  });
+
+  function targetGW() {
+    if (!isMobile) return 800;
+    const ar = window.innerWidth / window.innerHeight;
+    if (ar < 1) return 800;                       // portrait — keep the standard world
+    return Math.max(800, Math.min(1200, Math.round(GH * ar)));
+  }
+
   function resizeCanvas() {
-    const maxW = window.innerWidth - 8;
-    const maxH = isMobile ? (window.innerHeight - 200) : (window.innerHeight - 120);
-    const scale = Math.min(maxW / GW, maxH / GH, 1);
-    canvas.style.width = (GW * scale) + "px";
-    canvas.style.height = (GH * scale) + "px";
+    const gw = targetGW();
+    if (gw !== GW) { GW = gw; canvas.width = GW; }
+
+    if (isMobile) {
+      const portrait = window.innerWidth < window.innerHeight;
+      rotateScreen.classList.toggle("show", portrait && !rotateDismissed);
+      const scale = Math.min(window.innerWidth / GW, window.innerHeight / GH);
+      canvas.style.width = (GW * scale) + "px";
+      canvas.style.height = (GH * scale) + "px";
+    } else {
+      const scale = Math.min((window.innerWidth - 8) / GW, (window.innerHeight - 120) / GH, 1);
+      canvas.style.width = (GW * scale) + "px";
+      canvas.style.height = (GH * scale) + "px";
+    }
   }
   window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 250));
   resizeCanvas();
 
   showScreen("start");
