@@ -270,11 +270,11 @@
   let rocketPickups, hasRocket;
   let heartPickups, coinMultiplier, coinMultTimer, coinMultPickups;
   let shopOpen, shopItems;
-  let currentWeapon, availableWeapons; // weapon switching system
+  let currentWeapon, availableWeapons;
+  let maxDistance, meteors, grenadePickups, hasGrenade;
   const SHIELD_DURATION = 1800;
-  const LEVEL2_SCORE = 100;
-  const LEVEL3_SCORE = 250;
-  const LEVEL4_SCORE = 450;
+  // Distance-based level progression (not score)
+  const LEVEL_DIST = [0, 3000, 7000, 12000, 18000]; // distances for levels 1-5
   const BOSS_HP = 5;
   const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
@@ -282,6 +282,10 @@
     player = { x: 200, y: GROUND_Y, vy: 0, right: true, ground: true };
     lasers = []; enemies = []; coins = []; explosions = [];
     score = 0; frame = 0; spawnTimer = 0; coinTimer = 0; cameraX = 0;
+    maxDistance = 0;
+    meteors = [];
+    grenadePickups = [];
+    hasGrenade = false;
     lives = 5;
     hitFlashTimer = 0;
     invincibleTimer = 0;
@@ -380,7 +384,9 @@
     const keepStars = stars;
     const keepLives = lives;
     const keepRocket = hasRocket;
+    const keepGrenade = hasGrenade;
     const keepShop = JSON.parse(JSON.stringify(shopItems));
+    const keepDist = maxDistance;
     initState();
     score = keepScore;
     level = keepLevel;
@@ -388,7 +394,9 @@
     stars = keepStars;
     lives = keepLives;
     hasRocket = keepRocket;
+    hasGrenade = keepGrenade;
     shopItems = keepShop;
+    maxDistance = keepDist;
     hitFlashTimer = 0;
     invincibleTimer = 0;
     
@@ -399,6 +407,8 @@
     if (weaponLevel >= 1) availableWeapons.push("dual");
     if (shopItems.tripleShot.bought) availableWeapons.push("triple");
     if (hasRocket) availableWeapons.push("rocket");
+    if (hasGrenade) availableWeapons.push("grenade");
+    if (hasGrenade) availableWeapons.push("grenade");
     if (currentWeapon >= availableWeapons.length) currentWeapon = 0;
   }
 
@@ -410,7 +420,7 @@
 
   function getWeaponName() {
     rebuildWeaponList();
-    const names = { laser: "לייזר", dual: "x2 כפול", triple: "משולש 🔥", rocket: "🚀 רקטה" };
+    const names = { laser: "לייזר", dual: "x2 כפול", triple: "משולש 🔥", rocket: "🚀 רקטה", grenade: "💣 רימון" };
     return names[availableWeapons[currentWeapon]] || "לייזר";
   }
 
@@ -429,6 +439,8 @@
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 2.2, powered: true });
     } else if (wep === "rocket") {
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 0, rocket: true });
+    } else if (wep === "grenade") {
+      lasers.push({ x: p.x + ox, y: p.y - 20, dir, vx: 8 * dir, vy: -6, grenade: true, grav: 0.15 });
     } else {
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 0, powered: false });
     }
@@ -444,9 +456,9 @@
     keys[e.key] = true;
     if (e.key === " " && state === "playing") shootLaser();
     // Number keys 1-4 for weapon selection (Roblox style)
-    if (state === "playing" && e.key >= "1" && e.key <= "4") {
+    if (state === "playing" && e.key >= "1" && e.key <= "5") {
       rebuildWeaponList();
-      const allWeapons = ["laser", "dual", "triple", "rocket"];
+      const allWeapons = ["laser", "dual", "triple", "rocket", "grenade"];
       const wantedWeapon = allWeapons[parseInt(e.key) - 1];
       const idx = availableWeapons.indexOf(wantedWeapon);
       if (idx >= 0) currentWeapon = idx;
@@ -513,16 +525,16 @@
     }
     // Weapon hotbar click
     if (state === "playing" && !shopOpen) {
-      const slotW = 52, gap = 6;
-      const totalW = 4 * slotW + 3 * gap;
+      const slotW = 48, gap = 5;
+      const totalW = 5 * slotW + 4 * gap;
       const startX = GW / 2 - totalW / 2;
-      const sy = GH - 42 - 12;
-      if (my > sy && my < sy + 42) {
-        for (let i = 0; i < 4; i++) {
+      const sy = GH - 40 - 12;
+      if (my > sy && my < sy + 40) {
+        for (let i = 0; i < 5; i++) {
           const wx = startX + i * (slotW + gap);
           if (mx > wx && mx < wx + slotW) {
             rebuildWeaponList();
-            const allW = ["laser","dual","triple","rocket"];
+            const allW = ["laser","dual","triple","rocket","grenade"];
             const idx = availableWeapons.indexOf(allW[i]);
             if (idx >= 0) currentWeapon = idx;
           }
@@ -734,6 +746,11 @@
         ctx.fillStyle = "#e2e8f0";
         ctx.font = "bold 20px 'Fredoka', sans-serif";
         ctx.fillText("🚀 !דוידי בחלל העמוק", GW/2, GH/2 + 20);
+      } else if (level === 4) {
+        ctx.fillText("LEVEL 5", GW/2, GH/2 - 20);
+        ctx.fillStyle = "#e2e8f0";
+        ctx.font = "bold 20px 'Fredoka', sans-serif";
+        ctx.fillText("🔴 !דוידי נוחת על מאדים", GW/2, GH/2 + 20);
       }
     }
   }
@@ -833,16 +850,16 @@
   }
   function drawWeaponHotbar() {
     rebuildWeaponList();
-    const slotW = 52, slotH = 42, gap = 6;
-    const totalW = 4 * slotW + 3 * gap;
+    const slotW = 48, slotH = 40, gap = 5;
+    const totalW = 5 * slotW + 4 * gap;
     const startX = GW / 2 - totalW / 2;
     const sy = GH - slotH - 12;
-    const allWeapons = ["laser", "dual", "triple", "rocket"];
-    const icons = { laser: "🔫", dual: "⚡", triple: "🔥", rocket: "🚀" };
-    const names = { laser: "לייזר", dual: "כפול", triple: "משולש", rocket: "רקטה" };
-    const colors = { laser: "#22c55e", dual: "#7c3aed", triple: "#f97316", rocket: "#dc2626" };
+    const allWeapons = ["laser", "dual", "triple", "rocket", "grenade"];
+    const icons = { laser: "🔫", dual: "⚡", triple: "🔥", rocket: "🚀", grenade: "💣" };
+    const names = { laser: "לייזר", dual: "כפול", triple: "משולש", rocket: "רקטה", grenade: "רימון" };
+    const colors = { laser: "#22c55e", dual: "#7c3aed", triple: "#f97316", rocket: "#dc2626", grenade: "#166534" };
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       const wx = startX + i * (slotW + gap);
       const wkey = allWeapons[i];
       const owned = availableWeapons.includes(wkey);
@@ -1088,7 +1105,7 @@
     ctx.beginPath(); ctx.roundRect(GW - 70, GH - 28, 62, 22, 8); ctx.fill();
     ctx.fillStyle = "#fde047"; ctx.font = "bold 12px 'Bungee', Impact, sans-serif";
     ctx.textAlign = "center";
-    const icons = ["🌳","🌙","👾","🚀"];
+    const icons = ["🌳","🌙","👾","🚀","🔴"];
     ctx.fillText((icons[level-1]||"")+" LV"+level, GW - 39, GH - 13);
   }
 
@@ -1179,7 +1196,167 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawShopButton() {
+  // === MARS LEVEL (Level 5) ===
+  function drawMarsSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, GH);
+    g.addColorStop(0, "#1a0a00"); g.addColorStop(0.3, "#3d1500"); g.addColorStop(0.7, "#6b2a00"); g.addColorStop(1, "#8b4513");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, GW, GH);
+    // Dim stars visible through thin atmosphere
+    stars.forEach(st => {
+      if (st.b > 0.5) {
+        const tw = 0.2 + 0.3 * Math.abs(Math.sin(frame * st.sp + st.b * 10));
+        dC(st.x, st.y, st.s * 0.7, "#ffddaa", tw);
+      }
+    });
+    // Two moons
+    const m1x = wrapX(150, 0.02);
+    dC(m1x, 60, 14, "#e2e8f0", 0.5);
+    dC(m1x, 60, 10, "#f1f5f9", 0.6);
+    const m2x = wrapX(600, 0.03);
+    dC(m2x, 90, 8, "#fde68a", 0.4);
+    // Dust haze
+    ctx.globalAlpha = 0.08;
+    const hz = ctx.createLinearGradient(0, GH * 0.5, 0, GH);
+    hz.addColorStop(0, "transparent"); hz.addColorStop(1, "#d97706");
+    ctx.fillStyle = hz; ctx.fillRect(0, 0, GW, GH);
+    ctx.globalAlpha = 1;
+  }
+  function drawMarsHills() {
+    const MH = [{o:120,rx:200,ry:55},{o:450,rx:260,ry:45},{o:780,rx:180,ry:50}];
+    MH.forEach(h => { dE(wrapX(h.o, 0.3), GROUND_Y + 10, h.rx, h.ry, "rgba(139,69,19,0.4)"); });
+  }
+  function drawMarsGround() {
+    dR(0, GROUND_Y + 32, GW, GH - GROUND_Y, "#8b4513");
+    dR(0, GROUND_Y + 28, GW, 12, "#a0522d", 4);
+    // Red rocks and craters
+    const MARS_ROCKS = [60, 220, 400, 570, 740, 900];
+    MARS_ROCKS.forEach(ro => {
+      const sx = wrapX(ro, 1);
+      ctx.fillStyle = "#6b3410";
+      ctx.beginPath(); ctx.moveTo(sx-12,GROUND_Y+28); ctx.lineTo(sx-5,GROUND_Y+10);
+      ctx.lineTo(sx+3,GROUND_Y+14); ctx.lineTo(sx+14,GROUND_Y+28); ctx.fill();
+      ctx.fillStyle = "#7c4a1e";
+      ctx.beginPath(); ctx.moveTo(sx-5,GROUND_Y+28); ctx.lineTo(sx,GROUND_Y+18);
+      ctx.lineTo(sx+6,GROUND_Y+28); ctx.fill();
+    });
+    // Surface craters
+    [100, 300, 520, 700, 860].forEach(co => {
+      const sx = wrapX(co, 1);
+      ctx.strokeStyle = "rgba(100,40,10,0.5)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(sx, GROUND_Y + 36, 20, 5, 0, 0, Math.PI * 2); ctx.stroke();
+      dE(sx, GROUND_Y + 36, 17, 3.5, "rgba(80,30,5,0.3)");
+    });
+  }
+  function drawMarsPlatform(x, y, w) {
+    const hw = w / 2;
+    // Red-brown rocky platform
+    ctx.fillStyle = "#8b4513";
+    ctx.beginPath();
+    ctx.moveTo(x - hw, y + 5); ctx.lineTo(x - hw + 12, y - 9);
+    ctx.lineTo(x - hw * 0.2, y - 12); ctx.lineTo(x + hw * 0.3, y - 10);
+    ctx.lineTo(x + hw - 8, y - 7); ctx.lineTo(x + hw, y + 5);
+    ctx.lineTo(x + hw - 6, y + 10); ctx.lineTo(x - hw + 6, y + 10);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#a0522d";
+    ctx.beginPath();
+    ctx.moveTo(x - hw + 12, y - 9); ctx.lineTo(x - hw * 0.2, y - 12);
+    ctx.lineTo(x + hw * 0.3, y - 10); ctx.lineTo(x + hw - 8, y - 7);
+    ctx.lineTo(x + hw - 14, y - 3); ctx.lineTo(x - hw + 16, y - 3);
+    ctx.closePath(); ctx.fill();
+    // Small crater
+    dE(x - 5, y - 3, 5, 3, "rgba(80,30,5,0.4)");
+  }
+
+  // Meteor drawing
+  function drawMeteor(x, y, size) {
+    ctx.shadowColor = "#ff6600"; ctx.shadowBlur = 10;
+    // Tail/trail
+    ctx.globalAlpha = 0.4;
+    dE(x - 8, y - 12, 6, 18, "#ff6600");
+    ctx.globalAlpha = 0.2;
+    dE(x - 10, y - 20, 4, 25, "#fbbf24");
+    ctx.globalAlpha = 1;
+    // Rock body
+    ctx.fillStyle = "#4a2800";
+    ctx.beginPath();
+    ctx.moveTo(x, y - size); ctx.lineTo(x + size * 0.8, y - size * 0.3);
+    ctx.lineTo(x + size * 0.6, y + size * 0.7); ctx.lineTo(x - size * 0.5, y + size * 0.6);
+    ctx.lineTo(x - size * 0.7, y - size * 0.2);
+    ctx.closePath(); ctx.fill();
+    // Hot spots
+    ctx.fillStyle = "#dc2626"; dC(x, y, size * 0.3, "#dc2626", 0.7);
+    ctx.fillStyle = "#ff6600"; dC(x - 2, y - 2, size * 0.15, "#fbbf24");
+    ctx.shadowBlur = 0;
+  }
+
+  // Grenade pickup drawing
+  function drawGrenadePickup(x, y) {
+    const bob = Math.sin(frame * 0.06) * 5;
+    const dy = y + bob;
+    ctx.shadowColor = "#22c55e"; ctx.shadowBlur = 10;
+    // Grenade body
+    dC(x, dy, 12, "#166534");
+    dC(x, dy, 9, "#22c55e");
+    // Handle
+    dR(x - 3, dy - 18, 6, 8, "#4a5568", 2);
+    // Pin
+    dL(x + 3, dy - 16, x + 8, dy - 20, "#fbbf24", 2);
+    ctx.shadowBlur = 0;
+    // Sparkle
+    const sp = (frame * 0.1) % (Math.PI * 2);
+    dC(x + Math.cos(sp) * 18, dy + Math.sin(sp) * 16, 2, "#22c55e", 0.6);
+  }
+
+  // Grenade projectile drawing
+  function drawGrenadeProjectile(x, y, dir) {
+    ctx.shadowColor = "#22c55e"; ctx.shadowBlur = 8;
+    dC(x, y, 7, "#166534");
+    dC(x, y, 5, "#22c55e");
+    // Trail
+    ctx.globalAlpha = 0.3;
+    dE(x - 6 * dir, y, 8, 4, "#22c55e");
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  // Progress bar — shows distance to next level
+  function drawProgressBar() {
+    if (level >= 5) return; // no progress bar on final level
+    const nextDist = LEVEL_DIST[level]; // distance needed for next level
+    const prevDist = level > 1 ? LEVEL_DIST[level - 1] : 0;
+    const pct = Math.min((maxDistance - prevDist) / (nextDist - prevDist), 1);
+    const barW = 160, barH = 10;
+    const bx = GW - barW - 16, by = 12;
+    // Background
+    dR(bx, by, barW, barH, "rgba(0,0,0,0.4)", 5);
+    // Fill
+    const col = pct > 0.8 ? "#4ade80" : pct > 0.5 ? "#fbbf24" : "#60a5fa";
+    dR(bx, by, barW * pct, barH, col, 5);
+    // Label
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.font = "bold 9px 'Fredoka', sans-serif";
+    ctx.textAlign = "right";
+    const icons = ["🌳","🌙","👾","🚀","🔴"];
+    ctx.fillText(icons[level] + " שלב " + (level + 1) + " ←", bx - 4, by + 9);
+  }
+
+  function drawMarsEnemy(x, y, v) {
+    // Insectoid Mars alien
+    dL(x-6, y+14, x-10, y+26, "#92400e", 4);
+    dL(x+6, y+14, x+10, y+26, "#92400e", 4);
+    dE(x, y, 13, 16, "#92400e", "#7c2d12", 2);
+    dE(x, y-18, 15, 13, "#92400e", "#7c2d12", 2);
+    // Mandibles
+    dL(x-8, y-10, x-14, y-6, "#7c2d12", 2);
+    dL(x+8, y-10, x+14, y-6, "#7c2d12", 2);
+    // Multi-eyes (4 eyes)
+    dC(x-6, y-20, 4, "#fbbf24"); dC(x+6, y-20, 4, "#fbbf24");
+    dC(x-3, y-16, 3, "#fbbf24"); dC(x+3, y-16, 3, "#fbbf24");
+    dC(x-6, y-20, 2, "#1e1e1e"); dC(x+6, y-20, 2, "#1e1e1e");
+    dC(x-3, y-16, 1.5, "#1e1e1e"); dC(x+3, y-16, 1.5, "#1e1e1e");
+    // Spines
+    if (v === 0) { dL(x, y-30, x, y-36, "#7c2d12", 2); dC(x, y-38, 2, "#ef4444"); }
+    else { dL(x-6, y-28, x-8, y-34, "#7c2d12", 1.5); dL(x+6, y-28, x+8, y-34, "#7c2d12", 1.5); }
+  }
     ctx.fillStyle = "rgba(0,0,0,0.4)";
     ctx.beginPath(); ctx.roundRect(10, GH - 34, 70, 28, 10); ctx.fill();
     ctx.fillStyle = "#fde047"; ctx.font = "bold 13px 'Bungee', Impact, sans-serif";
@@ -1397,22 +1574,41 @@
 
     // Lasers
     lasers = lasers.filter(l => {
+      if (l.grenade) {
+        l.x += l.vx; l.vy += l.grav; l.y += l.vy;
+        // Grenade explodes on ground — area damage
+        if (l.y >= GROUND_Y - 5) {
+          // Area explosion — kill all enemies within radius
+          for (let i = enemies.length - 1; i >= 0; i--) {
+            if (Math.abs(enemies[i].x - l.x) < 80 && Math.abs(enemies[i].y - l.y) < 60) {
+              const pts = enemies[i].boss ? 10 : 5;
+              score += pts;
+              explosions.push({ x: enemies[i].x - cameraX, y: enemies[i].y, sf: frame, big: enemies[i].boss });
+              enemies.splice(i, 1);
+            }
+          }
+          explosions.push({ x: l.x - cameraX, y: l.y, sf: frame, big: true });
+          return false;
+        }
+        const sx = l.x - cameraX; return sx > -40 && sx < GW + 40;
+      }
       const spd = l.rocket ? 7 : LASER_SPEED;
       l.x += spd * l.dir; l.y += (l.vy || 0);
-      const sx=l.x-cameraX; return sx>-40 && sx<GW+40 && l.y > -20 && l.y < GH+20;
+      const sx = l.x - cameraX; return sx > -40 && sx < GW + 40 && l.y > -20 && l.y < GH + 20;
     });
 
     // *** DIFFICULTY CURVE ***
-    // Level 1: 150 down to 90. Level 2: 90 down to 70. Level 3: stays around 80 — bosses add the challenge
     let spawnRate;
     if (level === 1) {
-      spawnRate = Math.max(90, 150 - score * 0.6);
+      spawnRate = Math.max(90, 150 - score * 0.5);
     } else if (level === 2) {
-      spawnRate = Math.max(70, 110 - (score - LEVEL2_SCORE) * 0.3);
+      spawnRate = Math.max(75, 110 - score * 0.1);
     } else if (level === 3) {
       spawnRate = 80;
+    } else if (level === 4) {
+      spawnRate = 75;
     } else {
-      spawnRate = 75; // level 4 — steady with bosses
+      spawnRate = 70; // level 5 — Mars
     }
     spawnTimer++;
     if (spawnTimer >= spawnRate) {
@@ -1575,6 +1771,50 @@
       return rp.x > cameraX - 200;
     });
 
+    // Grenade pickup spawning (level 5+)
+    let playerHit = false;
+    if (level >= 5 && !hasGrenade && grenadePickups.length < 1 && frame % 300 === 0) {
+      grenadePickups.push({
+        x: cameraX + GW * 0.5 + Math.random() * GW * 0.3,
+        y: GROUND_Y - 40 - Math.random() * 60
+      });
+    }
+    grenadePickups = grenadePickups.filter(gp => {
+      if (Math.abs(p.x - gp.x) < 30 && Math.abs(p.y - gp.y) < 40) {
+        hasGrenade = true; return false;
+      }
+      return gp.x > cameraX - 200;
+    });
+
+    // Meteors (level 5+) — fall from sky
+    if (level >= 5 && frame % 90 === 0) {
+      meteors.push({
+        x: cameraX + 50 + Math.random() * (GW - 100),
+        y: -30,
+        vy: 2.5 + Math.random() * 2,
+        vx: (Math.random() - 0.5) * 1.5,
+        size: 12 + Math.random() * 10
+      });
+    }
+    meteors = meteors.filter(m => {
+      m.x += m.vx; m.y += m.vy;
+      if (m.y > GH + 30) return false;
+      // Hit ground — explode
+      if (m.y >= GROUND_Y - 5) {
+        explosions.push({ x: m.x - cameraX, y: GROUND_Y, sf: frame });
+        return false;
+      }
+      // Hit player
+      if (shieldTimer <= 0 && invincibleTimer <= 0 && Math.abs(p.x - m.x) < m.size + 10 && Math.abs(p.y - m.y) < m.size + 15) {
+        lives--;
+        hitFlashTimer = 60; invincibleTimer = 90;
+        explosions.push({ x: p.x - cameraX, y: p.y, sf: frame });
+        if (lives <= 0) { playerHit = true; }
+        return false;
+      }
+      return true;
+    });
+
     // Heart pickup spawning — every ~1000 frames, if lives < 5
     if (lives < 5 && frame % 1000 === 0 && Math.random() < 0.5 && heartPickups.length < 1) {
       heartPickups.push({
@@ -1660,34 +1900,28 @@
       return true;
     });
 
-    // Level transition check
-    if (level === 1 && score >= LEVEL2_SCORE && !levelTransition) {
-      levelTransition = true;
-      transitionFrame = 0;
-    }
-    if (level === 2 && score >= LEVEL3_SCORE && !levelTransition) {
-      levelTransition = true;
-      transitionFrame = 0;
-    }
-    if (level === 3 && score >= LEVEL4_SCORE && !levelTransition) {
+    // Track max distance (only counts forward movement)
+    if (p.x > maxDistance) maxDistance = p.x;
+
+    // Distance-based level transition
+    const nextLevel = level < 5 ? level + 1 : 0;
+    if (nextLevel > 0 && maxDistance >= LEVEL_DIST[nextLevel - 1] && !levelTransition) {
       levelTransition = true;
       transitionFrame = 0;
     }
     if (levelTransition) {
       transitionFrame++;
       if (transitionFrame >= 120) {
-        if (level === 1) level = 2;
-        else if (level === 2) level = 3;
-        else if (level === 3) level = 4;
+        if (level < 5) level++;
         levelTransition = false;
         enemies = [];
         buddyAliens = [];
         enemyProjectiles = [];
+        meteors = [];
       }
     }
 
     // Player-enemy
-    let playerHit = false;
     for (let i = enemies.length - 1; i >= 0; i--) {
       const e = enemies[i];
       if (Math.abs(p.x - e.x) < 28 && Math.abs(p.y - e.y) < 36) {
@@ -1719,26 +1953,24 @@
 
     // === RENDER ===
     if (level === 1) {
-      drawSky();
-      drawSun();
+      drawSky(); drawSun();
       clouds.forEach(c => drawCloud(c.x, c.y, c.s));
       drawHills();
       TREE_DEFS.forEach(t => drawTree(wrapX(t.o, 0.7), t.v));
       drawGround();
+    } else if (level === 5) {
+      drawMarsSky(); drawMarsHills(); drawMarsGround();
     } else if (level === 4) {
-      drawDeepSpaceSky();
-      drawSpaceGround();
+      drawDeepSpaceSky(); drawSpaceGround();
     } else {
-      drawMoonSky();
-      drawEarth();
-      drawMoonHills();
-      drawGround();
+      drawMoonSky(); drawEarth(); drawMoonHills(); drawGround();
     }
     // Platforms by level
     platforms.forEach(pl => {
       const sx = pl.x - cameraX;
       if (sx > -100 && sx < GW + 100) {
-        if (level === 4) drawSpacePlatform(sx, pl.y, pl.w);
+        if (level === 5) drawMarsPlatform(sx, pl.y, pl.w);
+        else if (level === 4) drawSpacePlatform(sx, pl.y, pl.w);
         else if (level >= 2) drawMoonPlatform(sx, pl.y, pl.w);
         else drawPlatformCloud(sx, pl.y, pl.w);
       }
@@ -1749,10 +1981,15 @@
     rocketPickups.forEach(rp => { const sx=rp.x-cameraX; if(sx>-40&&sx<GW+40) drawRocketPickup(sx, rp.y); });
     heartPickups.forEach(hp => { const sx=hp.x-cameraX; if(sx>-40&&sx<GW+40) drawHeartPickup(sx, hp.y); });
     coinMultPickups.forEach(cm => { const sx=cm.x-cameraX; if(sx>-40&&sx<GW+40) drawCoinMultPickup(sx, cm.y); });
-    // Enemies — boss, space, or regular
+    // Grenade pickups
+    grenadePickups.forEach(gp => { const sx=gp.x-cameraX; if(sx>-40&&sx<GW+40) drawGrenadePickup(sx, gp.y); });
+    // Meteors
+    meteors.forEach(m => { drawMeteor(m.x - cameraX, m.y, m.size); });
+    // Enemies — mars, boss, space, or regular
     enemies.forEach(e => {
       const sx = e.x - cameraX;
       if (e.boss) drawBossAlien(sx, e.y, e.hp);
+      else if (level === 5) drawMarsEnemy(sx, e.y, e.v);
       else if (level === 4) drawSpaceEnemy(sx, e.y, e.v);
       else drawEnemy(sx, e.y, e.ci, e.v);
     });
@@ -1760,6 +1997,7 @@
     lasers.forEach(l => {
       const sx = l.x - cameraX;
       if (l.rocket) drawRocket(sx, l.y, l.dir);
+      else if (l.grenade) drawGrenadeProjectile(sx, l.y, l.dir);
       else drawLaser(sx, l.y, l.powered, l.buddy);
     });
     explosions.forEach(e => {
@@ -1776,6 +2014,7 @@
     drawLevelIndicator();
     drawShopButton();
     drawHeartsHUD();
+    drawProgressBar();
     // Level transition overlay
     if (levelTransition) drawLevelTransition();
 
