@@ -1357,6 +1357,8 @@
     if (v === 0) { dL(x, y-30, x, y-36, "#7c2d12", 2); dC(x, y-38, 2, "#ef4444"); }
     else { dL(x-6, y-28, x-8, y-34, "#7c2d12", 1.5); dL(x+6, y-28, x+8, y-34, "#7c2d12", 1.5); }
   }
+
+  function drawShopButton() {
     ctx.fillStyle = "rgba(0,0,0,0.4)";
     ctx.beginPath(); ctx.roundRect(10, GH - 34, 70, 28, 10); ctx.fill();
     ctx.fillStyle = "#fde047"; ctx.font = "bold 13px 'Bungee', Impact, sans-serif";
