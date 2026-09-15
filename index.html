@@ -454,6 +454,32 @@
   });
   window.addEventListener("keyup", e => { keys[e.key] = false; });
 
+  // Scroll wheel to cycle weapons (Roblox/Minecraft style)
+  window.addEventListener("wheel", e => {
+    if (state !== "playing" || shopOpen) return;
+    e.preventDefault();
+    rebuildWeaponList();
+    if (availableWeapons.length <= 1) return;
+    if (e.deltaY > 0) {
+      currentWeapon = (currentWeapon + 1) % availableWeapons.length;
+    } else {
+      currentWeapon = (currentWeapon - 1 + availableWeapons.length) % availableWeapons.length;
+    }
+  }, { passive: false });
+
+  // Scroll wheel to cycle weapons (Minecraft style)
+  window.addEventListener("wheel", e => {
+    if (state !== "playing" || shopOpen) return;
+    e.preventDefault();
+    rebuildWeaponList();
+    if (availableWeapons.length <= 1) return;
+    if (e.deltaY > 0) {
+      currentWeapon = (currentWeapon + 1) % availableWeapons.length;
+    } else {
+      currentWeapon = (currentWeapon - 1 + availableWeapons.length) % availableWeapons.length;
+    }
+  }, { passive: false });
+
   // Canvas click for shop
   canvas.addEventListener("click", e => {
     const rect = canvas.getBoundingClientRect();
@@ -1277,14 +1303,13 @@
   function drawShieldIndicator() {
     if (shieldTimer <= 0) return;
     const pct = shieldTimer / SHIELD_DURATION;
-    const barW = 100;
-    // Background
-    dR(GW/2 - barW/2, 28, barW, 8, "rgba(0,0,0,0.3)", 4);
-    // Fill — changes color as it runs out
+    const barW = 110;
+    // Position below hearts
+    dR(12, 36, barW, 10, "rgba(0,0,0,0.35)", 5);
     const col = pct > 0.3 ? "#60a5fa" : "#f97316";
-    dR(GW/2 - barW/2, 28, barW * pct, 8, col, 4);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 8px 'Fredoka', sans-serif";
-    ctx.textAlign = "center"; ctx.fillText("🛡️ מגן", GW/2, 26);
+    dR(12, 36, barW * pct, 10, col, 5);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 9px 'Fredoka', sans-serif";
+    ctx.textAlign = "left"; ctx.fillText("🛡️ מגן", 14, 34);
   }
   function drawPlatformCloud(x, y, w) {
     // A fluffy solid-looking cloud platform
