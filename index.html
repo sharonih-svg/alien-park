@@ -273,6 +273,11 @@
   let currentWeapon, availableWeapons;
   let maxDistance, meteors, grenadePickups, hasGrenade;
   let gamePaused;
+  let highScore = 0;
+  let finalBoss, finalBossActive, victoryScreen;
+  const FINAL_BOSS_HP = 25;
+  const FINAL_BOSS_DIST = 50000; // distance in level 5 to trigger boss
+  try { highScore = parseInt(localStorage.getItem("alienParkHighScore")) || 0; } catch(e) {}
   const SHIELD_DURATION = 1800;
   // Distance-based level progression (not score)
   const LEVEL_DIST = [0, 5000, 12000, 22000, 35000]; // distances for levels 1→2→3→4→5
@@ -288,6 +293,9 @@
     grenadePickups = [];
     hasGrenade = false;
     gamePaused = false;
+    finalBoss = null;
+    finalBossActive = false;
+    victoryScreen = false;
     lives = 5;
     hitFlashTimer = 0;
     invincibleTimer = 0;
@@ -523,6 +531,13 @@
           }
         }
       });
+      return;
+    }
+    // Victory screen — play again button
+    if (victoryScreen) {
+      if (mx > GW/2 - 80 && mx < GW/2 + 80 && my > GH/2 + 85 && my < GH/2 + 133) {
+        initState(); showScreen("playing"); gameLoop();
+      }
       return;
     }
     // Pause button click (top left, after hearts)
@@ -786,8 +801,32 @@
   // Entity drawing
   function drawAlien(x,y,right,jump) {
     const f=right?1:-1, jl=jump?30:34;
+    const hasSpeed = shopItems.speedBoost.bought;
+    // Speed lines when moving with speed boost
+    if (hasSpeed && (keys["ArrowLeft"] || keys["ArrowRight"])) {
+      ctx.globalAlpha = 0.4;
+      for (let s = 1; s <= 3; s++) {
+        dL(x - f * (10 + s * 12), y - 10 + s * 8, x - f * (22 + s * 12), y - 10 + s * 8, "#fbbf24", 2);
+      }
+      ctx.globalAlpha = 1;
+    }
     dL(x-6,y+18,x-10,y+jl,"#4ade80",5); dL(x+6,y+18,x+10,y+jl,"#4ade80",5);
-    dE(x-12,y+jl+2,6,3,"#f97316"); dE(x+12,y+jl+2,6,3,"#f97316");
+    // Shoes — bigger rocket shoes with speed boost
+    if (hasSpeed) {
+      // Rocket shoes!
+      dE(x-12,y+jl+2,9,5,"#ef4444"); dE(x+12,y+jl+2,9,5,"#ef4444");
+      dE(x-12,y+jl+1,6,3,"#fbbf24"); dE(x+12,y+jl+1,6,3,"#fbbf24");
+      // Flame trail when moving
+      if (keys["ArrowLeft"] || keys["ArrowRight"]) {
+        ctx.globalAlpha = 0.6;
+        dC(x-12,y+jl+6,3,"#ff6600"); dC(x+12,y+jl+6,3,"#ff6600");
+        ctx.globalAlpha = 0.3;
+        dC(x-12,y+jl+9,2,"#fbbf24"); dC(x+12,y+jl+9,2,"#fbbf24");
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      dE(x-12,y+jl+2,6,3,"#f97316"); dE(x+12,y+jl+2,6,3,"#f97316");
+    }
     dL(x+14*f,y-4,x+24*f,y+(jump?-14:4),"#4ade80",5);
     dL(x-14*f,y-4,x-22*f,y+(jump?-10:6),"#4ade80",5);
     dE(x,y,16,20,"#4ade80","#22c55e",2); dE(x,y-26,20,18,"#4ade80","#22c55e",2);
@@ -944,6 +983,11 @@
     ctx.fillStyle = "#fde047"; ctx.font = "bold 24px 'Bungee', Impact, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("⭐ " + score + " ⭐", GW/2, 34);
+    // High score — small, top right of score box
+    if (highScore > 0) {
+      ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "bold 9px 'Fredoka', sans-serif";
+      ctx.textAlign = "center"; ctx.fillText("🏆 " + highScore + " :שיא", GW/2, 54);
+    }
   }
 
   function drawHeartsHUD() {
@@ -1346,41 +1390,26 @@
 
   // Progress bar — shows distance to next level
   function drawProgressBar() {
-    if (level >= 5) return;
-    const nextDist = LEVEL_DIST[level];
-    const prevDist = level > 1 ? LEVEL_DIST[level - 1] : 0;
-    const pct = Math.min((maxDistance - prevDist) / (nextDist - prevDist), 1);
-    const barW = 140, barH = 12;
-    const bx = GW - barW - 14, by = 10;
-    // Background
-    dR(bx, by, barW, barH, "rgba(0,0,0,0.45)", 6);
-    // Fill
-    const col = pct > 0.8 ? "#4ade80" : pct > 0.5 ? "#fbbf24" : "#60a5fa";
-    dR(bx, by, barW * pct, barH, col, 6);
-    // Label — next level number (level+1 is the NEXT level to reach)
-    ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.font = "bold 10px 'Fredoka', sans-serif";
-    ctx.textAlign = "right";
-    const icons = ["🌳","🌙","👾","🚀","🔴"];
-    ctx.fillText((icons[level] || "") + " " + (level + 1) + " שלב → ", bx - 4, by + 10);
+    // Removed — level transitions are a surprise!
   }
 
   function drawMarsEnemy(x, y, v) {
-    // Insectoid Mars alien
-    dL(x-6, y+14, x-10, y+26, "#92400e", 4);
-    dL(x+6, y+14, x+10, y+26, "#92400e", 4);
-    dE(x, y, 13, 16, "#92400e", "#7c2d12", 2);
-    dE(x, y-18, 15, 13, "#92400e", "#7c2d12", 2);
+    // Insectoid Mars alien — bright green to contrast red Mars
+    dL(x-6, y+14, x-10, y+26, "#059669", 4);
+    dL(x+6, y+14, x+10, y+26, "#059669", 4);
+    dE(x, y, 13, 16, "#10b981", "#059669", 2);
+    dE(x, y-18, 15, 13, "#10b981", "#059669", 2);
     // Mandibles
-    dL(x-8, y-10, x-14, y-6, "#7c2d12", 2);
-    dL(x+8, y-10, x+14, y-6, "#7c2d12", 2);
-    // Multi-eyes (4 eyes)
-    dC(x-6, y-20, 4, "#fbbf24"); dC(x+6, y-20, 4, "#fbbf24");
-    dC(x-3, y-16, 3, "#fbbf24"); dC(x+3, y-16, 3, "#fbbf24");
+    dL(x-8, y-10, x-14, y-6, "#047857", 3);
+    dL(x+8, y-10, x+14, y-6, "#047857", 3);
+    // Multi-eyes (4 glowing red eyes)
+    dC(x-6, y-20, 4, "#ef4444"); dC(x+6, y-20, 4, "#ef4444");
+    dC(x-3, y-16, 3, "#ef4444"); dC(x+3, y-16, 3, "#ef4444");
     dC(x-6, y-20, 2, "#1e1e1e"); dC(x+6, y-20, 2, "#1e1e1e");
     dC(x-3, y-16, 1.5, "#1e1e1e"); dC(x+3, y-16, 1.5, "#1e1e1e");
-    // Spines
-    if (v === 0) { dL(x, y-30, x, y-36, "#7c2d12", 2); dC(x, y-38, 2, "#ef4444"); }
-    else { dL(x-6, y-28, x-8, y-34, "#7c2d12", 1.5); dL(x+6, y-28, x+8, y-34, "#7c2d12", 1.5); }
+    // Spines — bright
+    if (v === 0) { dL(x, y-30, x, y-36, "#059669", 2); dC(x, y-38, 3, "#fbbf24"); }
+    else { dL(x-6, y-28, x-8, y-36, "#059669", 2); dL(x+6, y-28, x+8, y-36, "#059669", 2); dC(x-8,y-38,2,"#fbbf24"); dC(x+8,y-38,2,"#fbbf24"); }
   }
 
   function drawShopButton() {
@@ -1553,15 +1582,130 @@
     ctx.fillRect(0, 0, GW, GH);
     ctx.fillStyle = "#fde047"; ctx.font = "bold 36px 'Bungee', Impact, sans-serif";
     ctx.textAlign = "center"; ctx.fillText("⏸ השהייה", GW/2, GH/2 - 20);
-    // Resume button
     ctx.fillStyle = "#22c55e";
     ctx.beginPath(); ctx.roundRect(GW/2 - 70, GH/2 + 10, 140, 44, 14); ctx.fill();
     ctx.fillStyle = "white"; ctx.font = "bold 20px 'Bungee', Impact, sans-serif";
     ctx.fillText("▶ המשך", GW/2, GH/2 + 38);
   }
 
+  // === FINAL BOSS ===
+  function drawFinalBoss(boss) {
+    const bx = boss.x - cameraX, by = boss.y;
+    const phase = boss.hp <= FINAL_BOSS_HP * 0.4 ? 2 : boss.hp <= FINAL_BOSS_HP * 0.7 ? 1 : 0;
+    const shake = phase >= 2 ? Math.sin(frame * 0.5) * 3 : 0;
+    const sx = bx + shake;
+    // Shadow
+    ctx.globalAlpha = 0.2;
+    dE(sx, GROUND_Y + 35, 50, 8, "#000");
+    ctx.globalAlpha = 1;
+    // Legs — thick
+    dL(sx-16, by+30, sx-22, by+58, "#2d1554", 8);
+    dL(sx+16, by+30, sx+22, by+58, "#2d1554", 8);
+    dE(sx-24, by+60, 12, 5, "#1a0a30");
+    dE(sx+24, by+60, 12, 5, "#1a0a30");
+    // Body — massive
+    dE(sx, by, 30, 40, "#3b1f6e", "#2d1554", 3);
+    // Armor plates
+    dE(sx, by-5, 22, 15, "#4c1d95");
+    dE(sx, by+10, 18, 10, "#4c1d95");
+    // Arms — long claws
+    const armSwing = Math.sin(frame * 0.06) * 8;
+    dL(sx-30, by-10, sx-50, by+armSwing, "#3b1f6e", 7);
+    dL(sx+30, by-10, sx+50, by+armSwing, "#3b1f6e", 7);
+    // Claws
+    dL(sx-50, by+armSwing, sx-58, by+armSwing-6, "#c026d3", 3);
+    dL(sx-50, by+armSwing, sx-56, by+armSwing+5, "#c026d3", 3);
+    dL(sx+50, by+armSwing, sx+58, by+armSwing-6, "#c026d3", 3);
+    dL(sx+50, by+armSwing, sx+56, by+armSwing+5, "#c026d3", 3);
+    // Head — big and menacing
+    dE(sx, by-48, 28, 24, "#3b1f6e", "#2d1554", 3);
+    // Crown/horns
+    ctx.fillStyle = "#7c3aed";
+    ctx.beginPath(); ctx.moveTo(sx-20,by-65); ctx.lineTo(sx-12,by-80); ctx.lineTo(sx-6,by-62); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(sx+20,by-65); ctx.lineTo(sx+12,by-80); ctx.lineTo(sx+6,by-62); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(sx-4,by-70); ctx.lineTo(sx,by-88); ctx.lineTo(sx+4,by-70); ctx.fill();
+    // Ears
+    ctx.fillStyle = "#c026d3";
+    ctx.beginPath(); ctx.moveTo(sx-24,by-56); ctx.lineTo(sx-18,by-72); ctx.lineTo(sx-14,by-52); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(sx+24,by-56); ctx.lineTo(sx+18,by-72); ctx.lineTo(sx+14,by-52); ctx.fill();
+    // Eyes — large, glowing, angrier in later phases
+    const eyeGlow = phase >= 1 ? "#ef4444" : "#fbbf24";
+    dE(sx-10, by-52, 9, 10, eyeGlow);
+    dE(sx+10, by-52, 9, 10, eyeGlow);
+    dC(sx-10, by-51, 4, "#1e1e1e");
+    dC(sx+10, by-51, 4, "#1e1e1e");
+    // Angry brows — more angry in later phases
+    const browAngle = phase >= 2 ? 6 : 3;
+    dL(sx-18, by-62-browAngle, sx-4, by-60, "#2d1554", 3);
+    dL(sx+18, by-62-browAngle, sx+4, by-60, "#2d1554", 3);
+    // Mouth with fangs
+    ctx.beginPath(); ctx.moveTo(sx-12,by-38); ctx.quadraticCurveTo(sx,by-30,sx+12,by-38);
+    ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 2; ctx.stroke();
+    dL(sx-6, by-37, sx-5, by-31, "white", 2.5);
+    dL(sx+6, by-37, sx+5, by-31, "white", 2.5);
+    if (phase >= 1) { dL(sx-2, by-36, sx-1, by-32, "white", 2); dL(sx+2, by-36, sx+1, by-32, "white", 2); }
+    // Energy aura in phase 2
+    if (phase >= 2) {
+      ctx.globalAlpha = 0.15 + Math.sin(frame * 0.1) * 0.1;
+      dC(sx, by - 20, 70, "#c026d3");
+      ctx.globalAlpha = 1;
+    }
+    // HP bar — big, at top of screen
+    const hpW = 300, hpH = 16;
+    dR(GW/2 - hpW/2, 50, hpW, hpH, "rgba(0,0,0,0.5)", 8);
+    const hpPct = boss.hp / FINAL_BOSS_HP;
+    const hpCol = hpPct > 0.5 ? "#ef4444" : hpPct > 0.25 ? "#f97316" : "#fbbf24";
+    dR(GW/2 - hpW/2, 50, hpW * hpPct, hpH, hpCol, 8);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 11px 'Bungee', Impact, sans-serif";
+    ctx.textAlign = "center"; ctx.fillText("👾 הרשע הגדול", GW/2, 48);
+  }
+
+  function drawVictoryScreen() {
+    // Fireworks background
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, GW, GH);
+    // Firework particles
+    for (let i = 0; i < 8; i++) {
+      const fx = 100 + (i * 110) % GW;
+      const fy = 80 + (i * 70) % (GH * 0.5);
+      const ft = (frame * 0.03 + i) % 1;
+      const colors = ["#ef4444","#fbbf24","#22c55e","#60a5fa","#c084fc","#f472b6"];
+      for (let j = 0; j < 6; j++) {
+        const a = (j / 6) * Math.PI * 2 + ft * 4;
+        const dist = ft * 40;
+        dC(fx + Math.cos(a) * dist, fy + Math.sin(a) * dist, 3 * (1-ft), colors[(i+j)%6], 0.8*(1-ft));
+      }
+    }
+    // Trophy and text
+    ctx.fillStyle = "#fde047"; ctx.font = "bold 48px 'Bungee', Impact, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("🏆 ניצחון! 🏆", GW/2, GH/2 - 60);
+    ctx.fillStyle = "#e2e8f0"; ctx.font = "bold 24px 'Fredoka', sans-serif";
+    ctx.fillText("!דוידי הביס את הרשע הגדול", GW/2, GH/2 - 15);
+    ctx.fillStyle = "#fde047"; ctx.font = "bold 30px 'Bungee', Impact, sans-serif";
+    ctx.fillText("⭐ " + score + " :ניקוד סופי", GW/2, GH/2 + 30);
+    // High score
+    if (score >= highScore) {
+      ctx.fillStyle = "#4ade80"; ctx.font = "bold 20px 'Fredoka', sans-serif";
+      ctx.fillText("🎉 !שיא חדש", GW/2, GH/2 + 60);
+    } else {
+      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 16px 'Fredoka', sans-serif";
+      ctx.fillText("⭐ " + highScore + " :שיא", GW/2, GH/2 + 60);
+    }
+    // Play again button
+    ctx.fillStyle = "#22c55e";
+    ctx.beginPath(); ctx.roundRect(GW/2 - 80, GH/2 + 85, 160, 48, 14); ctx.fill();
+    ctx.fillStyle = "white"; ctx.font = "bold 20px 'Bungee', Impact, sans-serif";
+    ctx.fillText("↺ מההתחלה", GW/2, GH/2 + 115);
+  }
+
   function gameLoop() {
     if (state !== "playing") return;
+    if (victoryScreen) {
+      drawVictoryScreen();
+      requestAnimationFrame(gameLoop);
+      return;
+    }
     if (gamePaused) {
       drawPauseOverlay();
       return;
@@ -1756,15 +1900,89 @@
     });
 
     // Boss spawning (level 3+) — first one appears quickly
-    if (level >= 3) {
+    if (level >= 3 && !finalBossActive) {
       bossSpawnTimer++;
-      const bossRate = bossSpawnTimer < 120 ? 120 : 350; // first boss at 2 sec, then every ~5.8 sec
+      const bossRate = bossSpawnTimer < 120 ? 120 : 350;
       if (bossSpawnTimer >= bossRate) {
         bossSpawnTimer = 0;
         const fromR = Math.random() > 0.5;
         const spX = fromR ? (cameraX + GW + 60) : (cameraX - 60);
         const spd = (0.8 + Math.random() * 0.6) * (fromR ? -1 : 1);
         enemies.push({ x: spX, y: GROUND_Y - 20, speed: spd, ci: 0, v: 0, boss: true, hp: BOSS_HP, shootTimer: 0 });
+      }
+    }
+
+    // Final boss trigger — level 5 at distance threshold
+    if (level === 5 && !finalBossActive && !victoryScreen && maxDistance >= FINAL_BOSS_DIST) {
+      finalBossActive = true;
+      finalBoss = { x: cameraX + GW + 80, y: GROUND_Y - 30, hp: FINAL_BOSS_HP, shootTimer: 0, phase: 0 };
+      enemies = []; // clear regular enemies for boss fight
+    }
+
+    // Final boss behavior
+    if (finalBossActive && finalBoss) {
+      // Move toward player slowly
+      const targetX = player.x + 200;
+      finalBoss.x += (targetX - finalBoss.x) * 0.01;
+      // Shoot projectiles — faster in later phases
+      finalBoss.shootTimer++;
+      const shootRate = finalBoss.hp <= FINAL_BOSS_HP * 0.4 ? 40 : finalBoss.hp <= FINAL_BOSS_HP * 0.7 ? 60 : 80;
+      if (finalBoss.shootTimer >= shootRate) {
+        finalBoss.shootTimer = 0;
+        const dx = player.x - finalBoss.x;
+        const projDir = dx > 0 ? 1 : -1;
+        enemyProjectiles.push({ x: finalBoss.x, y: finalBoss.y - 20, vx: projDir * 5, vy: -2 });
+        // Phase 2+: shoot extra projectiles
+        if (finalBoss.hp <= FINAL_BOSS_HP * 0.7) {
+          enemyProjectiles.push({ x: finalBoss.x, y: finalBoss.y, vx: projDir * 4, vy: -3.5 });
+        }
+        if (finalBoss.hp <= FINAL_BOSS_HP * 0.4) {
+          enemyProjectiles.push({ x: finalBoss.x, y: finalBoss.y + 10, vx: projDir * 3, vy: -1 });
+        }
+      }
+      // Check laser hits on final boss
+      lasers = lasers.filter(l => {
+        if (Math.abs(l.x - finalBoss.x) < 40 && Math.abs(l.y - finalBoss.y) < 50) {
+          const dmg = l.rocket ? 5 : l.grenade ? 3 : 1;
+          finalBoss.hp -= dmg;
+          explosions.push({ x: finalBoss.x - cameraX + (Math.random()-0.5)*30, y: finalBoss.y - 20 + (Math.random()-0.5)*30, sf: frame });
+          if (finalBoss.hp <= 0) {
+            // BOSS DEFEATED!
+            explosions.push({ x: finalBoss.x - cameraX, y: finalBoss.y, sf: frame, big: true });
+            explosions.push({ x: finalBoss.x - cameraX - 30, y: finalBoss.y - 30, sf: frame, big: true });
+            explosions.push({ x: finalBoss.x - cameraX + 30, y: finalBoss.y - 20, sf: frame, big: true });
+            score += 50;
+            finalBoss = null;
+            finalBossActive = false;
+            victoryScreen = true;
+            // Save high score
+            if (score > highScore) {
+              highScore = score;
+              try { localStorage.setItem("alienParkHighScore", highScore); } catch(e) {}
+            }
+          }
+          return false;
+        }
+        return true;
+      });
+      // Player collision with final boss
+      if (finalBoss && Math.abs(player.x - finalBoss.x) < 35 && Math.abs(player.y - finalBoss.y) < 50) {
+        if (shieldTimer <= 0 && invincibleTimer <= 0) {
+          lives--;
+          hitFlashTimer = 60;
+          invincibleTimer = 90;
+          if (lives <= 0) {
+            finalScoreEl.textContent = score;
+            if (score > highScore) { highScore = score; try { localStorage.setItem("alienParkHighScore", highScore); } catch(e) {} }
+            gameoverTitle.textContent = "נגמר המשחק";
+            livesDisplay.textContent = "🖤🖤🖤🖤🖤";
+            gameoverMsg.textContent = "!כל הכבוד דוידי 🛸";
+            retryBtn.style.display = "none";
+            restartBtn.style.display = "inline-block";
+            if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
+            return;
+          }
+        }
       }
     }
 
@@ -1794,7 +2012,7 @@
             gameoverMsg.textContent = "!כל הכבוד דוידי 🛸";
             retryBtn.style.display = "none";
             restartBtn.style.display = "inline-block";
-            showScreen("gameover");
+            if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
             return;
           }
         } else {
@@ -2058,6 +2276,8 @@
     if (shieldTimer > 0) drawShieldBubble(psx, p.y);
     drawAlien(psx, p.y, p.right, !p.ground);
     if (buddy) drawBuddyAlien(buddy.x - cameraX, buddy.y, p.right);
+    // Final boss
+    if (finalBossActive && finalBoss) drawFinalBoss(finalBoss);
     drawWeaponHotbar();
     drawScoreHUD();
     drawShieldIndicator();
@@ -2097,7 +2317,7 @@
       gameoverMsg.textContent = "!כל הכבוד דוידי 🛸";
       retryBtn.style.display = "none";
       restartBtn.style.display = "inline-block";
-      showScreen("gameover");
+      if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
       return;
     }
 
