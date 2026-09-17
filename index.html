@@ -1924,18 +1924,21 @@
 
     // Final boss behavior
     if (finalBossActive && finalBoss) {
-      // Move toward player slowly
-      const targetX = player.x + 200;
-      finalBoss.x += (targetX - finalBoss.x) * 0.01;
+      // Move toward player — close enough to fight
+      const targetX = player.x + 180;
+      const dx = targetX - finalBoss.x;
+      finalBoss.x += dx * 0.03; // faster approach
+      // Keep boss on screen
+      if (finalBoss.x - cameraX > GW - 60) finalBoss.x = cameraX + GW - 60;
+      if (finalBoss.x - cameraX < 60) finalBoss.x = cameraX + 60;
       // Shoot projectiles — faster in later phases
       finalBoss.shootTimer++;
       const shootRate = finalBoss.hp <= FINAL_BOSS_HP * 0.4 ? 40 : finalBoss.hp <= FINAL_BOSS_HP * 0.7 ? 60 : 80;
       if (finalBoss.shootTimer >= shootRate) {
         finalBoss.shootTimer = 0;
-        const dx = player.x - finalBoss.x;
-        const projDir = dx > 0 ? 1 : -1;
+        const pdx = player.x - finalBoss.x;
+        const projDir = pdx > 0 ? 1 : -1;
         enemyProjectiles.push({ x: finalBoss.x, y: finalBoss.y - 20, vx: projDir * 5, vy: -2 });
-        // Phase 2+: shoot extra projectiles
         if (finalBoss.hp <= FINAL_BOSS_HP * 0.7) {
           enemyProjectiles.push({ x: finalBoss.x, y: finalBoss.y, vx: projDir * 4, vy: -3.5 });
         }
@@ -1945,12 +1948,12 @@
       }
       // Check laser hits on final boss
       lasers = lasers.filter(l => {
-        if (Math.abs(l.x - finalBoss.x) < 40 && Math.abs(l.y - finalBoss.y) < 50) {
+        if (!finalBoss) return true;
+        if (Math.abs(l.x - finalBoss.x) < 45 && Math.abs(l.y - finalBoss.y) < 55) {
           const dmg = l.rocket ? 5 : l.grenade ? 3 : 1;
           finalBoss.hp -= dmg;
           explosions.push({ x: finalBoss.x - cameraX + (Math.random()-0.5)*30, y: finalBoss.y - 20 + (Math.random()-0.5)*30, sf: frame });
           if (finalBoss.hp <= 0) {
-            // BOSS DEFEATED!
             explosions.push({ x: finalBoss.x - cameraX, y: finalBoss.y, sf: frame, big: true });
             explosions.push({ x: finalBoss.x - cameraX - 30, y: finalBoss.y - 30, sf: frame, big: true });
             explosions.push({ x: finalBoss.x - cameraX + 30, y: finalBoss.y - 20, sf: frame, big: true });
@@ -1958,7 +1961,6 @@
             finalBoss = null;
             finalBossActive = false;
             victoryScreen = true;
-            // Save high score
             if (score > highScore) {
               highScore = score;
               try { localStorage.setItem("alienParkHighScore", highScore); } catch(e) {}
