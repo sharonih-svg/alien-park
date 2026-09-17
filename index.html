@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Alien Park - דוידי 🛸</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bungee&family=Fredoka:wght@400;600;700&display=swap');
@@ -15,10 +15,12 @@
     position: fixed;
     width: 100%;
     height: 100%;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
   #game-container {
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -43,6 +45,7 @@
     display: block;
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     cursor: crosshair;
   }
   .controls-hint {
@@ -114,10 +117,10 @@
     display: none;
     position: fixed; bottom: 0; left: 0; right: 0;
     height: 120px; z-index: 100; pointer-events: none;
-    padding: 10px 16px 16px;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
   }
   .touch-area-left, .touch-area-right {
-    position: absolute; bottom: 16px; display: flex; gap: 10px; pointer-events: auto;
+    position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); display: flex; gap: 10px; pointer-events: auto;
   }
   .touch-area-left { left: 16px; }
   .touch-area-right { right: 16px; }
