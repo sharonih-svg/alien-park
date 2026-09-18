@@ -278,7 +278,7 @@
   let gamePaused;
   let highScore = 0;
   let finalBoss, finalBossActive, victoryScreen;
-  const FINAL_BOSS_HP = 25;
+  const FINAL_BOSS_HP = 18;
   const FINAL_BOSS_DIST = 50000; // distance in level 5 to trigger boss
   try { highScore = parseInt(localStorage.getItem("alienParkHighScore")) || 0; } catch(e) {}
   const SHIELD_DURATION = 1800;
@@ -1647,11 +1647,15 @@
     dL(sx-6, by-37, sx-5, by-31, "white", 2.5);
     dL(sx+6, by-37, sx+5, by-31, "white", 2.5);
     if (phase >= 1) { dL(sx-2, by-36, sx-1, by-32, "white", 2); dL(sx+2, by-36, sx+1, by-32, "white", 2); }
-    // Energy aura in phase 2
+    // Energy aura in phase 2 — subtle pulsing rings
     if (phase >= 2) {
-      ctx.globalAlpha = 0.15 + Math.sin(frame * 0.1) * 0.1;
-      dC(sx, by - 20, 70, "#c026d3");
-      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(192,38,211,0.25)";
+      ctx.lineWidth = 2;
+      const pulse1 = 45 + Math.sin(frame * 0.08) * 8;
+      const pulse2 = 55 + Math.sin(frame * 0.06 + 1) * 10;
+      ctx.beginPath(); ctx.arc(sx, by - 20, pulse1, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "rgba(139,92,246,0.15)";
+      ctx.beginPath(); ctx.arc(sx, by - 20, pulse2, 0, Math.PI * 2); ctx.stroke();
     }
     // HP bar — big, at top of screen
     const hpW = 300, hpH = 16;
@@ -1809,7 +1813,7 @@
       spawnRate = 70; // level 5 — Mars
     }
     spawnTimer++;
-    if (spawnTimer >= spawnRate) {
+    if (spawnTimer >= spawnRate && !finalBossActive) {
       spawnTimer = 0;
       const fromR = Math.random() > 0.5;
       const spX = fromR ? (cameraX + GW + 40) : (cameraX - 40);
@@ -1919,7 +1923,9 @@
     if (level === 5 && !finalBossActive && !victoryScreen && maxDistance >= FINAL_BOSS_DIST) {
       finalBossActive = true;
       finalBoss = { x: cameraX + GW + 80, y: GROUND_Y - 30, hp: FINAL_BOSS_HP, shootTimer: 0, phase: 0 };
-      enemies = []; // clear regular enemies for boss fight
+      enemies = []; // clear ALL enemies for clean boss arena
+      meteors = [];
+      enemyProjectiles = [];
     }
 
     // Final boss behavior
@@ -2061,7 +2067,7 @@
     });
 
     // Meteors (level 5+) — fall from sky
-    if (level >= 5 && frame % 90 === 0) {
+    if (level >= 5 && frame % 90 === 0 && !finalBossActive) {
       meteors.push({
         x: cameraX + 50 + Math.random() * (GW - 100),
         y: -30,
