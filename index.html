@@ -184,12 +184,12 @@
   </div>
   <div id="gameover-screen" class="screen-overlay" style="display:none">
     <div class="gameover-glow"></div>
-    <div class="gameover-title" id="gameover-title">נגמר המשחק</div>
+    <div class="gameover-title" id="gameover-title">נגמרו החיים</div>
     <div class="gameover-score" id="final-score">0</div>
     <div id="lives-display" style="font-size:1.6rem; margin-bottom:4px;"></div>
-    <div class="gameover-msg" id="gameover-msg">!כל הכבוד דוידי 🛸</div>
+    <div class="gameover-msg" id="gameover-msg">כמעט! בוא ננסה שוב 💪</div>
     <button class="game-btn btn-purple" id="retry-btn" style="display:none">▶ המשך</button>
-    <button class="game-btn btn-green" id="restart-btn" style="display:none; margin-top:12px;">↺ מההתחלה</button>
+    <button class="game-btn btn-green" id="restart-btn" style="display:none; margin-top:12px;">↺ שחק שוב</button>
   </div>
   <div id="playing-ui" style="display:none;">
     <canvas id="game-canvas"></canvas>
@@ -208,7 +208,7 @@
 </div>
 <script>
 (() => {
-  const GW = 960, GH = 540, GROUND_Y = 440;
+  let GW = 960; const GH = 540, GROUND_Y = 440;
   const GRAVITY = 0.55, JUMP_FORCE = -14, MOVE_SPEED = 5.5, LASER_SPEED = 12;
   const AIR_MOVE_SPEED = 6.5; // faster horizontal movement in air for arc jumps
   const EC = [
@@ -275,7 +275,15 @@
   let shopOpen, shopItems;
   let currentWeapon, availableWeapons;
   let maxDistance, meteors, grenadePickups, hasGrenade;
+  let icePickups, hasIce;
   let gamePaused;
+  let coinsCollected, nextCoinX, nextEnemyX;
+  let victoryBonusLeft, victoryFrame, victoryCoinsFx, victoryNewRecord;
+  // Level is reached by coins collected (never goes down when buying in the shop).
+  // Coins only appear along the path ahead, so standing still doesn't earn them.
+  const LEVEL_COINS = [0, 0, 100, 250, 450, 700]; // index = level number
+  const FINAL_BOSS_COINS = 1000;
+  const VICTORY_BONUS = 500;
   let highScore = 0;
   let finalBoss, finalBossActive, victoryScreen;
   const FINAL_BOSS_HP = 18;
@@ -292,9 +300,13 @@
     lasers = []; enemies = []; coins = []; explosions = [];
     score = 0; frame = 0; spawnTimer = 0; coinTimer = 0; cameraX = 0;
     maxDistance = 0;
+    coinsCollected = 0; nextCoinX = 450; nextEnemyX = 1100;
+    victoryBonusLeft = 0; victoryFrame = 0; victoryCoinsFx = []; victoryNewRecord = false;
     meteors = [];
     grenadePickups = [];
     hasGrenade = false;
+    icePickups = [];
+    hasIce = false;
     gamePaused = false;
     finalBoss = null;
     finalBossActive = false;
@@ -377,6 +389,38 @@
     coins.push({ x: wx, y: py - 22, type: ct, val: cv });
   }
 
+  function spawnCoinGroup(wx) {
+    const n = 3 + Math.floor(Math.random() * 3);
+    const arc = Math.random() < 0.5; // arcs invite a jump
+    for (let i = 0; i < n; i++) {
+      const y = arc ? GROUND_Y - 30 - Math.sin((i / (n - 1)) * Math.PI) * 75 : GROUND_Y - 30;
+      const r = Math.random();
+      let t = "gold", v = 1;
+      if (level >= 2 && r < 0.08) { t = "gem"; v = 5; }
+      else if (level >= 2 && r < 0.22) { t = "silver"; v = 3; }
+      coins.push({ x: wx + i * 34, y, type: t, val: v });
+    }
+  }
+
+  function continueToRing() {
+    victoryScreen = false;
+    level = 6;
+    levelTransition = true; transitionFrame = 0;
+    enemies = []; enemyProjectiles = []; meteors = []; buddyAliens = [];
+    invincibleTimer = 150;
+    nextEnemyX = cameraX + GW + 400;
+    // first ice beam shows up right away
+    icePickups.push({ x: cameraX + GW * 0.7, y: GROUND_Y - 60 });
+  }
+
+  function fitCanvas() {
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
+    GW = Math.round(Math.min(1500, Math.max(720, GH * w / h)));
+    canvas.width = GW; canvas.height = GH;
+  }
+  window.addEventListener("resize", fitCanvas);
+
   function showScreen(s) {
     state = s;
     startScreen.style.display = s === "start" ? "flex" : "none";
@@ -384,6 +428,10 @@
     playingUI.style.display = s === "playing" ? "block" : "none";
     container.className = s === "start" ? "start-bg" : s === "gameover" ? "gameover-bg" : "sky-bg";
     touchControls.style.display = (isMobile && s === "playing") ? "block" : "none";
+    if (s === "playing") fitCanvas();
+    if (s === "gameover") {
+      livesDisplay.textContent = (score > 0 && score >= highScore) ? "🏆 שיא חדש!" : "🏆 השיא שלך: " + highScore;
+    }
   }
 
   startBtn.onclick = () => { initState(); showScreen("playing"); gameLoop(); };
@@ -398,8 +446,10 @@
     const keepLives = lives;
     const keepRocket = hasRocket;
     const keepGrenade = hasGrenade;
+    const keepIce = hasIce;
     const keepShop = JSON.parse(JSON.stringify(shopItems));
     const keepDist = maxDistance;
+    const keepCoins = coinsCollected;
     initState();
     score = keepScore;
     level = keepLevel;
@@ -408,8 +458,10 @@
     lives = keepLives;
     hasRocket = keepRocket;
     hasGrenade = keepGrenade;
+    hasIce = keepIce;
     shopItems = keepShop;
     maxDistance = keepDist;
+    coinsCollected = keepCoins;
     hitFlashTimer = 0;
     invincibleTimer = 0;
     
@@ -421,7 +473,7 @@
     if (shopItems.tripleShot.bought) availableWeapons.push("triple");
     if (hasRocket) availableWeapons.push("rocket");
     if (hasGrenade) availableWeapons.push("grenade");
-    if (hasGrenade) availableWeapons.push("grenade");
+    if (hasIce) availableWeapons.push("ice");
     if (currentWeapon >= availableWeapons.length) currentWeapon = 0;
   }
 
@@ -433,7 +485,7 @@
 
   function getWeaponName() {
     rebuildWeaponList();
-    const names = { laser: "לייזר", dual: "x2 כפול", triple: "משולש 🔥", rocket: "🚀 רקטה", grenade: "💣 רימון" };
+    const names = { laser: "לייזר", dual: "x2 כפול", triple: "משולש 🔥", rocket: "🚀 רקטה", grenade: "💣 רימון", ice: "❄️ קרח" };
     return names[availableWeapons[currentWeapon]] || "לייזר";
   }
 
@@ -452,6 +504,9 @@
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 2.2, powered: true });
     } else if (wep === "rocket") {
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 0, rocket: true });
+    } else if (wep === "ice") {
+      // Ice beam — passes through every enemy in its path
+      lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 0, ice: true, hits: [] });
     } else if (wep === "grenade") {
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vx: 8 * dir, vy: -6, grenade: true, grav: 0.15 });
     } else {
@@ -473,9 +528,9 @@
       if (!gamePaused) gameLoop();
     }
     // Number keys 1-4 for weapon selection (Roblox style)
-    if (state === "playing" && e.key >= "1" && e.key <= "5") {
+    if (state === "playing" && e.key >= "1" && e.key <= "6") {
       rebuildWeaponList();
-      const allWeapons = ["laser", "dual", "triple", "rocket", "grenade"];
+      const allWeapons = ["laser", "dual", "triple", "rocket", "grenade", "ice"];
       const wantedWeapon = allWeapons[parseInt(e.key) - 1];
       const idx = availableWeapons.indexOf(wantedWeapon);
       if (idx >= 0) currentWeapon = idx;
@@ -538,13 +593,13 @@
     }
     // Victory screen — play again button
     if (victoryScreen) {
-      if (mx > GW/2 - 80 && mx < GW/2 + 80 && my > GH/2 + 85 && my < GH/2 + 133) {
-        initState(); showScreen("playing"); gameLoop();
+      if (victoryBonusLeft === 0 && mx > GW/2 - 120 && mx < GW/2 + 120 && my > GH/2 + 85 && my < GH/2 + 135) {
+        continueToRing(); // loop already running
       }
       return;
     }
-    // Pause button click (top left, after hearts)
-    if (mx > 160 && mx < 194 && my > 10 && my < 36 && state === "playing") {
+    // Pause button (top right)
+    if (inRect(mx, my, hudRects().pause) && state === "playing") {
       gamePaused = !gamePaused;
       if (!gamePaused) gameLoop();
       return;
@@ -556,22 +611,19 @@
       return;
     }
     if (gamePaused) return;
-    if (mx > 12 && mx < 88 && my > GH - 38 && my < GH - 8 && state === "playing") {
+    if (inRect(mx, my, hudRects().shop) && state === "playing") {
       shopOpen = true;
       return;
     }
     // Weapon hotbar click
     if (state === "playing" && !shopOpen) {
-      const slotW = 48, gap = 5;
-      const totalW = 5 * slotW + 4 * gap;
-      const startX = GW / 2 - totalW / 2;
-      const sy = GH - 40 - 12;
-      if (my > sy && my < sy + 40) {
-        for (let i = 0; i < 5; i++) {
+      const { slotW, slotH, gap, startX, sy } = hotbarGeom();
+      if (my > sy && my < sy + slotH) {
+        for (let i = 0; i < 6; i++) {
           const wx = startX + i * (slotW + gap);
           if (mx > wx && mx < wx + slotW) {
             rebuildWeaponList();
-            const allW = ["laser","dual","triple","rocket","grenade"];
+            const allW = ["laser","dual","triple","rocket","grenade","ice"];
             const idx = availableWeapons.indexOf(allW[i]);
             if (idx >= 0) currentWeapon = idx;
           }
@@ -584,6 +636,13 @@
     const touch = e.changedTouches[0];
     const mx = (touch.clientX - rect.left) * (GW / rect.width);
     const my = (touch.clientY - rect.top) * (GH / rect.height);
+    e.preventDefault(); // no duplicate "click" after the tap
+    if (victoryScreen) {
+      if (victoryBonusLeft === 0 && mx > GW/2 - 120 && mx < GW/2 + 120 && my > GH/2 + 85 && my < GH/2 + 135) {
+        continueToRing();
+      }
+      return;
+    }
     if (shopOpen) {
       if (mx > GW/2 - 60 && mx < GW/2 + 60 && my > 395 && my < 435) {
         shopOpen = false; gameLoop(); return;
@@ -604,7 +663,7 @@
       });
       return;
     }
-    if (mx > 160 && mx < 194 && my > 10 && my < 36 && state === "playing") {
+    if (inRect(mx, my, hudRects().pause) && state === "playing") {
       gamePaused = !gamePaused;
       if (!gamePaused) gameLoop();
       return;
@@ -613,7 +672,7 @@
       gamePaused = false; gameLoop(); return;
     }
     if (gamePaused) return;
-    if (mx > 12 && mx < 88 && my > GH - 38 && my < GH - 8 && state === "playing") {
+    if (inRect(mx, my, hudRects().shop) && state === "playing") {
       shopOpen = true; return;
     }
   });
@@ -797,6 +856,13 @@
         ctx.fillStyle = "#e2e8f0";
         ctx.font = "bold 20px 'Fredoka', sans-serif";
         ctx.fillText("🔴 !דוידי נוחת על מאדים", GW/2, GH/2 + 20);
+      } else if (level === 6) {
+        ctx.fillText("LEVEL 6", GW/2, GH/2 - 20);
+        ctx.fillStyle = "#e2e8f0";
+        ctx.font = "bold 20px 'Fredoka', sans-serif";
+        ctx.fillText("דוידי רץ על הטבעת של שבתאי! 🪐", GW/2, GH/2 + 20);
+        ctx.fillStyle = "#7dd3fc"; ctx.font = "600 16px 'Fredoka', sans-serif";
+        ctx.fillText("כאן הכבידה חלשה — קופצים גבוה!", GW/2, GH/2 + 48);
       }
     }
   }
@@ -920,16 +986,13 @@
   }
   function drawWeaponHotbar() {
     rebuildWeaponList();
-    const slotW = 48, slotH = 40, gap = 5;
-    const totalW = 5 * slotW + 4 * gap;
-    const startX = GW / 2 - totalW / 2;
-    const sy = GH - slotH - 12;
-    const allWeapons = ["laser", "dual", "triple", "rocket", "grenade"];
-    const icons = { laser: "🔫", dual: "⚡", triple: "🔥", rocket: "🚀", grenade: "💣" };
-    const names = { laser: "לייזר", dual: "כפול", triple: "משולש", rocket: "רקטה", grenade: "רימון" };
-    const colors = { laser: "#22c55e", dual: "#7c3aed", triple: "#f97316", rocket: "#dc2626", grenade: "#166534" };
+    const { slotW, slotH, gap, startX, sy } = hotbarGeom();
+    const allWeapons = ["laser", "dual", "triple", "rocket", "grenade", "ice"];
+    const icons = { laser: "🔫", dual: "⚡", triple: "🔥", rocket: "🚀", grenade: "💣", ice: "❄️" };
+    const names = { laser: "לייזר", dual: "כפול", triple: "משולש", rocket: "רקטה", grenade: "רימון", ice: "קרח" };
+    const colors = { laser: "#22c55e", dual: "#7c3aed", triple: "#f97316", rocket: "#dc2626", grenade: "#166534", ice: "#0891b2" };
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < allWeapons.length; i++) {
       const wx = startX + i * (slotW + gap);
       const wkey = allWeapons[i];
       const owned = availableWeapons.includes(wkey);
@@ -956,55 +1019,77 @@
 
       // Number key
       ctx.fillStyle = selected ? "#fde047" : owned ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)";
-      ctx.font = "bold 10px 'Bungee', Impact, sans-serif";
+      ctx.font = "bold 12px 'Bungee', Impact, sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText(i + 1, wx + 5, sy + 13);
+      ctx.fillText(i + 1, wx + 6, sy + 15);
 
       // Icon
-      ctx.font = "18px sans-serif"; ctx.textAlign = "center";
+      ctx.font = "22px sans-serif"; ctx.textAlign = "center";
       if (!owned) ctx.globalAlpha = 0.3;
-      ctx.fillText(icons[wkey], wx + slotW / 2, sy + 24);
+      ctx.fillText(icons[wkey], wx + slotW / 2, sy + 29);
       ctx.globalAlpha = 1;
 
       // Name
       ctx.fillStyle = owned ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.25)";
-      ctx.font = "8px 'Fredoka', sans-serif";
+      ctx.font = "600 12px 'Fredoka', sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(names[wkey], wx + slotW / 2, sy + 38);
+      ctx.fillText(names[wkey], wx + slotW / 2, sy + 46);
 
       // Lock icon if not owned
       if (!owned) {
-        ctx.font = "14px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText("🔒", wx + slotW / 2, sy + 24);
+        ctx.font = "16px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("🔒", wx + slotW / 2, sy + 29);
       }
     }
   }
 
+  // ===== HUD layout (shared by drawing and click handling) =====
+  function hudRects() {
+    return {
+      pause: { x: GW - 60, y: 12, w: 48, h: 48 },
+      shop:  { x: GW - 60 - 12 - 116, y: 12, w: 116, h: 48 },
+    };
+  }
+  function inRect(mx, my, r) { return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h; }
+  function hudPanel(x, y, w, h, r, fill) {
+    ctx.save();
+    ctx.fillStyle = fill || "rgba(15,23,42,0.55)";
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r || 14); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  }
+  function hotbarGeom() {
+    const slotW = 58, slotH = 52, gap = 7, n = 6;
+    const totalW = n * slotW + (n - 1) * gap;
+    return { slotW, slotH, gap, startX: GW / 2 - totalW / 2, sy: GH - slotH - 6 };
+  }
+
   function drawScoreHUD() {
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.beginPath(); ctx.roundRect(GW/2 - 90, 8, 180, 36, 14); ctx.fill();
-    ctx.fillStyle = "#fde047"; ctx.font = "bold 24px 'Bungee', Impact, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("⭐ " + score + " ⭐", GW/2, 34);
-    // High score — small, top right of score box
+    const cx = GW / 2;
+    hudPanel(cx - 105, 12, 210, 48, 24);
+    ctx.save(); ctx.direction = "ltr"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fde047"; ctx.font = "28px 'Bungee', Impact, sans-serif";
+    ctx.fillText("🪙 " + score, cx, 38);
+    ctx.restore();
     if (highScore > 0) {
-      ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "bold 9px 'Fredoka', sans-serif";
-      ctx.textAlign = "center"; ctx.fillText("🏆 " + highScore + " :שיא", GW/2, 54);
+      ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.font = "600 14px 'Fredoka', sans-serif";
+      ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 4;
+      ctx.fillText("🏆 שיא: " + highScore, cx, 74);
+      ctx.restore();
     }
   }
 
   function drawHeartsHUD() {
-    for (let i = 0; i < 5; i++) {
-      const hx = 18 + i * 28;
-      ctx.font = "20px sans-serif";
-      if (i < lives) {
-        ctx.fillText("❤️", hx, 28);
-      } else {
-        ctx.globalAlpha = 0.3;
-        ctx.fillText("🖤", hx, 28);
-        ctx.globalAlpha = 1;
-      }
+    const n = Math.max(5, lives);
+    hudPanel(12, 12, 20 + n * 32, 48, 24);
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "24px sans-serif";
+    for (let i = 0; i < n; i++) {
+      const hx = 12 + 10 + 16 + i * 32;
+      if (i < lives) ctx.fillText("❤️", hx, 37);
+      else { ctx.globalAlpha = 0.3; ctx.fillText("🖤", hx, 37); ctx.globalAlpha = 1; }
     }
+    ctx.restore();
   }
 
   // --- BOSS ALIEN (tall purple villain) ---
@@ -1162,23 +1247,22 @@
   function drawCoinMultIndicator() {
     if (coinMultiplier <= 1) return;
     const pct = coinMultTimer / 900;
-    // Position: below score, center
-    ctx.fillStyle = "#92400e"; ctx.shadowColor = "#fbbf24"; ctx.shadowBlur = 6;
-    ctx.beginPath(); ctx.roundRect(GW/2 - 55, 48, 110, 18, 8); ctx.fill();
-    ctx.shadowBlur = 0;
-    dR(GW/2 - 53, 58, 106 * pct, 5, "#fbbf24", 2);
-    ctx.fillStyle = "#fde047"; ctx.font = "bold 11px 'Bungee', Impact, sans-serif";
-    ctx.textAlign = "center"; ctx.fillText("x2 מטבעות", GW/2, 61);
+    const cx = GW / 2, y = highScore > 0 ? 88 : 68;
+    hudPanel(cx - 80, y, 160, 32, 16, "rgba(146,64,14,0.85)");
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fde047"; ctx.font = "700 15px 'Fredoka', sans-serif";
+    ctx.fillText("x2 מטבעות", cx, y + 13);
+    ctx.restore();
+    dR(cx - 66, y + 23, 132 * pct, 4, "#fbbf24", 2);
   }
 
   function drawLevelIndicator() {
-    // Bottom right corner
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.beginPath(); ctx.roundRect(GW - 80, GH - 32, 72, 26, 10); ctx.fill();
-    ctx.fillStyle = "#fde047"; ctx.font = "bold 14px 'Bungee', Impact, sans-serif";
-    ctx.textAlign = "center";
-    const icons = ["🌳","🌙","👾","🚀","🔴"];
-    ctx.fillText((icons[level-1]||"") + " שלב " + level, GW - 44, GH - 14);
+    const icons = ["🌳","🌙","👾","🚀","🔴","🪐"];
+    hudPanel(12, 68, 132, 38, 19);
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fde047"; ctx.font = "700 19px 'Fredoka', sans-serif";
+    ctx.fillText((icons[level - 1] || "") + " שלב " + level, 12 + 66, 88);
+    ctx.restore();
   }
 
   // Space enemy (level 4) — glowing galactic alien
@@ -1339,6 +1423,126 @@
     dE(x - 5, y - 3, 5, 3, "rgba(80,30,5,0.4)");
   }
 
+  // === SATURN'S RING (Level 6) ===
+  function drawRingSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, GH);
+    g.addColorStop(0, "#0b1026"); g.addColorStop(0.6, "#1e1b4b"); g.addColorStop(1, "#3b2a5a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, GW, GH);
+    stars.forEach(st => {
+      const tw = 0.3 + 0.7 * Math.abs(Math.sin(frame * st.sp + st.b * 10));
+      dC(st.x * GW / 960, st.y, st.s, "#ffffff", tw * 0.8);
+    });
+    // Giant Saturn behind, drifting very slowly
+    const px = GW * 0.66 - ((cameraX * 0.015) % 80), py = 205, r = 165, tilt = -0.18;
+    const ringRx = r * 2.15, ringRy = r * 0.36;
+    const ringBack = () => {
+      ctx.save(); ctx.translate(px, py); ctx.rotate(tilt);
+      [["rgba(233,213,168,0.55)", 0], ["rgba(201,143,90,0.45)", 16], ["rgba(241,217,168,0.5)", 30]].forEach(([c, d]) => {
+        ctx.strokeStyle = c; ctx.lineWidth = 12;
+        ctx.beginPath(); ctx.ellipse(0, 0, ringRx - d, ringRy - d * 0.17, 0, Math.PI, Math.PI * 2); ctx.stroke();
+      });
+      ctx.restore();
+    };
+    const ringFront = () => {
+      ctx.save(); ctx.translate(px, py); ctx.rotate(tilt);
+      [["rgba(233,213,168,0.8)", 0], ["rgba(201,143,90,0.7)", 16], ["rgba(241,217,168,0.75)", 30]].forEach(([c, d]) => {
+        ctx.strokeStyle = c; ctx.lineWidth = 12;
+        ctx.beginPath(); ctx.ellipse(0, 0, ringRx - d, ringRy - d * 0.17, 0, 0, Math.PI); ctx.stroke();
+      });
+      ctx.restore();
+    };
+    ringBack();
+    // Planet with bands
+    ctx.save();
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
+    const bands = ["#e8c48a", "#d9a86c", "#f1d9a8", "#c98f5a", "#e3bb85", "#d4a373", "#f0d6a4"];
+    for (let i = 0; i < bands.length; i++) {
+      ctx.fillStyle = bands[i];
+      ctx.fillRect(px - r, py - r + i * (2 * r / bands.length), 2 * r, 2 * r / bands.length + 1);
+    }
+    const shade = ctx.createRadialGradient(px - r * 0.4, py - r * 0.4, r * 0.2, px, py, r);
+    shade.addColorStop(0, "rgba(255,255,255,0.15)"); shade.addColorStop(1, "rgba(30,20,60,0.55)");
+    ctx.fillStyle = shade; ctx.fillRect(px - r, py - r, 2 * r, 2 * r);
+    ctx.restore();
+    ringFront();
+    // Floating ring dust (mid layer)
+    for (let i = 0; i < 14; i++) {
+      const dx = wrapX(i * 71, 0.5), dy = 300 + ((i * 37) % 90);
+      dC(dx, dy, 1.5 + (i % 3), "rgba(241,217,168,0.5)");
+    }
+  }
+  function drawRingGround() {
+    // We run on the ring itself — icy bands
+    const top = GROUND_Y + 28;
+    const stripes = ["#efdcb6", "#c9b3e6", "#e3c897", "#b8a2d9", "#d9b98a", "#a993cc"];
+    const sh = (GH - top) / stripes.length;
+    stripes.forEach((c, i) => { ctx.fillStyle = c; ctx.fillRect(0, top + i * sh, GW, sh + 1); });
+    ctx.fillStyle = "#fff7e6"; ctx.fillRect(0, top, GW, 4);
+    ctx.globalAlpha = 0.35; ctx.fillStyle = "#c4b5fd"; ctx.fillRect(0, top - 6, GW, 6); ctx.globalAlpha = 1;
+    // ice chunks & sparkles moving with the ground
+    [40, 150, 290, 410, 560, 690, 830, 930].forEach((o, i) => {
+      const sx = wrapX(o, 1);
+      ctx.fillStyle = i % 2 ? "#e0f2fe" : "#bae6fd";
+      ctx.beginPath(); ctx.moveTo(sx - 9, top); ctx.lineTo(sx - 3, top - 10); ctx.lineTo(sx + 6, top - 6); ctx.lineTo(sx + 10, top); ctx.fill();
+      const tw = 0.4 + 0.6 * Math.abs(Math.sin(frame * 0.05 + i));
+      dC(wrapX(o + 45, 1), top + 18 + (i % 3) * 14, 2, "#ffffff", tw);
+    });
+  }
+  function drawIcePlatform(x, y, w) {
+    const hw = w / 2;
+    ctx.fillStyle = "#7dd3fc";
+    ctx.beginPath();
+    ctx.moveTo(x - hw, y + 2); ctx.lineTo(x - hw + 10, y - 11); ctx.lineTo(x - hw * 0.2, y - 14);
+    ctx.lineTo(x + hw * 0.4, y - 12); ctx.lineTo(x + hw - 6, y - 8); ctx.lineTo(x + hw, y + 2);
+    ctx.lineTo(x + hw * 0.5, y + 13); ctx.lineTo(x - hw * 0.4, y + 12); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#0284c7"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#e0f2fe";
+    ctx.beginPath();
+    ctx.moveTo(x - hw + 10, y - 11); ctx.lineTo(x - hw * 0.2, y - 14); ctx.lineTo(x + hw * 0.4, y - 12);
+    ctx.lineTo(x + hw - 6, y - 8); ctx.lineTo(x + hw - 12, y - 4); ctx.lineTo(x - hw + 14, y - 4); ctx.closePath(); ctx.fill();
+    // facets
+    ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - hw * 0.2, y - 4); ctx.lineTo(x - hw * 0.05, y + 10); ctx.moveTo(x + hw * 0.35, y - 4); ctx.lineTo(x + hw * 0.25, y + 10); ctx.stroke();
+  }
+  function drawIceEnemy(x, y, v) {
+    dL(x - 6, y + 14, x - 9, y + 26, "#0369a1", 4);
+    dL(x + 6, y + 14, x + 9, y + 26, "#0369a1", 4);
+    dE(x, y, 14, 16, "#e0f2fe", "#0369a1", 2.5);
+    dE(x, y - 20, 15, 13, "#e0f2fe", "#0369a1", 2.5);
+    // crystal spikes
+    ctx.fillStyle = "#38bdf8";
+    const spikes = v === 0 ? [-9, 0, 9] : [-6, 6];
+    spikes.forEach(sxo => { ctx.beginPath(); ctx.moveTo(x + sxo - 4, y - 30); ctx.lineTo(x + sxo, y - 44); ctx.lineTo(x + sxo + 4, y - 30); ctx.fill(); });
+    // glowing eyes
+    ctx.shadowColor = "#22d3ee"; ctx.shadowBlur = 8;
+    dE(x - 6, y - 21, 4.5, 5, "#0c4a6e"); dE(x + 6, y - 21, 4.5, 5, "#0c4a6e");
+    ctx.shadowBlur = 0;
+    dC(x - 5, y - 22, 1.5, "#67e8f9"); dC(x + 7, y - 22, 1.5, "#67e8f9");
+    // frosty frown
+    ctx.beginPath(); ctx.moveTo(x - 5, y - 11); ctx.quadraticCurveTo(x, y - 15, x + 5, y - 11);
+    ctx.strokeStyle = "#0369a1"; ctx.lineWidth = 2; ctx.stroke();
+  }
+  function drawIcePickup(x, y) {
+    const bob = Math.sin(frame * 0.06) * 5, dy = y + bob;
+    ctx.shadowColor = "#22d3ee"; ctx.shadowBlur = 14;
+    dR(x - 15, dy - 15, 30, 30, "#0e7490", 7);
+    dR(x - 12, dy - 12, 24, 24, "#22d3ee", 5);
+    ctx.shadowBlur = 0;
+    ctx.font = "18px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("❄️", x, dy + 1);
+    ctx.textBaseline = "alphabetic";
+    const sp = (frame * 0.12) % (Math.PI * 2);
+    dC(x + Math.cos(sp) * 22, dy + Math.sin(sp) * 18, 2, "#ffffff", 0.8);
+    dC(x + Math.cos(sp + 3) * 20, dy + Math.sin(sp + 3) * 16, 1.5, "#a5f3fc", 0.7);
+  }
+  function drawIceBeam(x, y, dir) {
+    ctx.shadowColor = "#22d3ee"; ctx.shadowBlur = 14;
+    dR(x - 26, y - 4, 52, 8, "#22d3ee", 4);
+    dR(x - 22, y - 2, 44, 4, "#ecfeff", 2);
+    ctx.shadowBlur = 0;
+    for (let i = 0; i < 3; i++) dC(x - dir * (30 + i * 9), y + Math.sin(frame * 0.4 + i) * 4, 2 - i * 0.5, "#a5f3fc", 0.8 - i * 0.2);
+  }
+
   // Meteor drawing
   function drawMeteor(x, y, size) {
     ctx.shadowColor = "#ff6600"; ctx.shadowBlur = 10;
@@ -1416,19 +1620,19 @@
   }
 
   function drawShopButton() {
-    // Shop button — bottom left
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.beginPath(); ctx.roundRect(12, GH - 38, 76, 30, 10); ctx.fill();
-    ctx.fillStyle = "#fde047"; ctx.font = "bold 14px 'Bungee', Impact, sans-serif";
-    ctx.textAlign = "center"; ctx.fillText("🛒 חנות", 50, GH - 18);
+    const r = hudRects().shop;
+    hudPanel(r.x, r.y, r.w, r.h, 24, "rgba(124,58,237,0.75)");
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff"; ctx.font = "700 19px 'Fredoka', sans-serif";
+    ctx.fillText("🛒 חנות", r.x + r.w / 2, r.y + r.h / 2 + 1);
+    ctx.restore();
   }
 
   function drawPauseButton() {
-    // Pause button — top left, after hearts area
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.beginPath(); ctx.roundRect(160, 10, 34, 26, 8); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.font = "bold 16px sans-serif";
-    ctx.textAlign = "center"; ctx.fillText("⏸", 177, 28);
+    const r = hudRects().pause;
+    hudPanel(r.x, r.y, r.w, r.h, 24);
+    dR(r.x + 16, r.y + 14, 6, 20, "#fff", 2);
+    dR(r.x + 26, r.y + 14, 6, 20, "#fff", 2);
   }
 
   function drawShopOverlay() {
@@ -1548,13 +1752,13 @@
   function drawShieldIndicator() {
     if (shieldTimer <= 0) return;
     const pct = shieldTimer / SHIELD_DURATION;
-    const barW = 130;
-    // Position clearly below hearts row
-    dR(14, 40, barW, 12, "rgba(0,0,0,0.4)", 6);
-    const col = pct > 0.3 ? "#60a5fa" : "#f97316";
-    dR(14, 40, barW * pct, 12, col, 6);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 10px 'Fredoka', sans-serif";
-    ctx.textAlign = "left"; ctx.fillText("🛡️ מגן", 18, 38);
+    hudPanel(12, 114, 160, 36, 18);
+    ctx.save(); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff"; ctx.font = "600 14px 'Fredoka', sans-serif";
+    ctx.fillText("🛡️ מגן", 12 + 150, 132);
+    ctx.restore();
+    dR(24, 127, 66, 10, "rgba(255,255,255,0.15)", 5);
+    dR(24, 127, 66 * pct, 10, pct > 0.3 ? "#60a5fa" : "#f97316", 5);
   }
   function drawPlatformCloud(x, y, w) {
     // A fluffy solid-looking cloud platform
@@ -1659,51 +1863,79 @@
     }
     // HP bar — big, at top of screen
     const hpW = 300, hpH = 16;
-    dR(GW/2 - hpW/2, 50, hpW, hpH, "rgba(0,0,0,0.5)", 8);
+    dR(GW/2 - hpW/2, 124, hpW, hpH, "rgba(0,0,0,0.5)", 8);
     const hpPct = boss.hp / FINAL_BOSS_HP;
     const hpCol = hpPct > 0.5 ? "#ef4444" : hpPct > 0.25 ? "#f97316" : "#fbbf24";
-    dR(GW/2 - hpW/2, 50, hpW * hpPct, hpH, hpCol, 8);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 11px 'Bungee', Impact, sans-serif";
-    ctx.textAlign = "center"; ctx.fillText("👾 הרשע הגדול", GW/2, 48);
+    dR(GW/2 - hpW/2, 124, hpW * hpPct, hpH, hpCol, 8);
+    ctx.fillStyle = "#fff"; ctx.font = "700 15px 'Fredoka', sans-serif";
+    ctx.textAlign = "center"; ctx.fillText("👾 הרשע הגדול", GW/2, 118);
   }
 
   function drawVictoryScreen() {
-    // Fireworks background
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(0, 0, GW, GH);
-    // Firework particles
-    for (let i = 0; i < 8; i++) {
-      const fx = 100 + (i * 110) % GW;
-      const fy = 80 + (i * 70) % (GH * 0.5);
-      const ft = (frame * 0.03 + i) % 1;
-      const colors = ["#ef4444","#fbbf24","#22c55e","#60a5fa","#c084fc","#f472b6"];
-      for (let j = 0; j < 6; j++) {
-        const a = (j / 6) * Math.PI * 2 + ft * 4;
-        const dist = ft * 40;
-        dC(fx + Math.cos(a) * dist, fy + Math.sin(a) * dist, 3 * (1-ft), colors[(i+j)%6], 0.8*(1-ft));
+    victoryFrame++;
+    const cx = GW / 2, cy = GH / 2;
+    const scoreY = cy + 20;
+    // Count the bonus up into the score, coins flying in
+    if (victoryBonusLeft > 0 && victoryFrame > 50) {
+      const step = Math.min(6, victoryBonusLeft);
+      score += step; victoryBonusLeft -= step;
+      if (victoryFrame % 3 === 0) victoryCoinsFx.push({ x: cx + (Math.random() - 0.5) * 220, y: cy - 30, t: 0 });
+      if (victoryBonusLeft === 0 && score > highScore) {
+        highScore = score; victoryNewRecord = true;
+        try { localStorage.setItem("alienParkHighScore", highScore); } catch (e) {}
       }
     }
-    // Trophy and text
-    ctx.fillStyle = "#fde047"; ctx.font = "bold 48px 'Bungee', Impact, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("🏆 ניצחון! 🏆", GW/2, GH/2 - 60);
-    ctx.fillStyle = "#e2e8f0"; ctx.font = "bold 24px 'Fredoka', sans-serif";
-    ctx.fillText("!דוידי הביס את הרשע הגדול", GW/2, GH/2 - 15);
-    ctx.fillStyle = "#fde047"; ctx.font = "bold 30px 'Bungee', Impact, sans-serif";
-    ctx.fillText("⭐ " + score + " :ניקוד סופי", GW/2, GH/2 + 30);
-    // High score
-    if (score >= highScore) {
-      ctx.fillStyle = "#4ade80"; ctx.font = "bold 20px 'Fredoka', sans-serif";
-      ctx.fillText("🎉 !שיא חדש", GW/2, GH/2 + 60);
-    } else {
-      ctx.fillStyle = "#94a3b8"; ctx.font = "bold 16px 'Fredoka', sans-serif";
-      ctx.fillText("⭐ " + highScore + " :שיא", GW/2, GH/2 + 60);
+    // Background — solid each frame (no smearing)
+    const g = ctx.createLinearGradient(0, 0, 0, GH);
+    g.addColorStop(0, "#1e1b4b"); g.addColorStop(1, "#4c1d95");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, GW, GH);
+    // Fireworks
+    const colors = ["#ef4444","#fbbf24","#22c55e","#60a5fa","#c084fc","#f472b6"];
+    for (let i = 0; i < 10; i++) {
+      const fx = (GW / 10) * (i + 0.5);
+      const fy = 60 + ((i * 53) % 140);
+      const ft = (victoryFrame * 0.015 + i * 0.37) % 1;
+      for (let j = 0; j < 8; j++) {
+        const a = (j / 8) * Math.PI * 2;
+        dC(fx + Math.cos(a) * ft * 55, fy + Math.sin(a) * ft * 55, 3.5 * (1 - ft), colors[(i + j) % 6], 0.9 * (1 - ft));
+      }
     }
-    // Play again button
-    ctx.fillStyle = "#22c55e";
-    ctx.beginPath(); ctx.roundRect(GW/2 - 80, GH/2 + 85, 160, 48, 14); ctx.fill();
-    ctx.fillStyle = "white"; ctx.font = "bold 20px 'Bungee', Impact, sans-serif";
-    ctx.fillText("↺ מההתחלה", GW/2, GH/2 + 115);
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    // Title
+    ctx.fillStyle = "#fde047"; ctx.font = "700 54px 'Fredoka', sans-serif";
+    ctx.fillText("🏆 ניצחון! 🏆", cx, cy - 130);
+    ctx.fillStyle = "#e2e8f0"; ctx.font = "600 24px 'Fredoka', sans-serif";
+    ctx.fillText("דוידי הביס את הרשע הגדול!", cx, cy - 90);
+    // Bonus line — pulses while counting
+    const pulse = victoryBonusLeft > 0 ? 1 + Math.sin(victoryFrame * 0.25) * 0.06 : 1;
+    ctx.save(); ctx.translate(cx, cy - 38); ctx.scale(pulse, pulse);
+    ctx.fillStyle = "#4ade80"; ctx.font = "700 30px 'Fredoka', sans-serif";
+    ctx.fillText("+500 בונוס על הבוס!", 0, 0);
+    ctx.restore();
+    // Flying coins into the score
+    victoryCoinsFx = victoryCoinsFx.filter(c => {
+      c.t += 0.05;
+      const x = c.x + (cx - c.x) * c.t, y = c.y + (scoreY - 12 - c.y) * c.t - Math.sin(c.t * Math.PI) * 40;
+      drawCoin(x, y, "gold");
+      return c.t < 1;
+    });
+    // Score
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath(); ctx.roundRect(cx - 130, scoreY - 40, 260, 58, 18); ctx.fill();
+    ctx.save(); ctx.direction = "ltr";
+    ctx.fillStyle = "#fde047"; ctx.font = "34px 'Bungee', Impact, sans-serif";
+    ctx.fillText("🪙 " + score, cx, scoreY + 2);
+    ctx.restore();
+    if (victoryBonusLeft === 0 && victoryFrame > 50) {
+      ctx.font = "700 20px 'Fredoka', sans-serif";
+      if (victoryNewRecord) { ctx.fillStyle = "#4ade80"; ctx.fillText("🎉 שיא חדש!", cx, cy + 66); }
+      else { ctx.fillStyle = "#cbd5e1"; ctx.fillText("🏆 השיא שלך: " + highScore, cx, cy + 66); }
+      // Play again button
+      ctx.fillStyle = "#22c55e";
+      ctx.beginPath(); ctx.roundRect(cx - 120, cy + 85, 240, 50, 16); ctx.fill();
+      ctx.fillStyle = "white"; ctx.font = "700 22px 'Fredoka', sans-serif";
+      ctx.fillText("🚀 טסים לטבעת!", cx, cy + 118);
+    }
   }
 
   function gameLoop() {
@@ -1731,11 +1963,12 @@
     if (keys["ArrowLeft"]) { p.x -= spd; p.right = false; }
     if (keys["ArrowRight"]) { p.x += spd; p.right = true; }
     // Apply super jump if bought
-    const jf = shopItems.superJump.bought ? JUMP_FORCE * 1.25 : JUMP_FORCE;
+    const baseJump = level === 6 ? -12 : JUMP_FORCE;
+    const jf = shopItems.superJump.bought ? baseJump * 1.25 : baseJump;
     if (keys["ArrowUp"] && p.ground) { p.vy = jf; p.ground = false; }
 
     // Physics
-    p.vy += GRAVITY; p.y += p.vy;
+    p.vy += (level === 6 ? 0.36 : GRAVITY); p.y += p.vy;
     if (p.y >= GROUND_Y) { p.y = GROUND_Y; p.vy = 0; p.ground = true; }
 
     // Cloud platform collision — only when falling down
@@ -1809,11 +2042,13 @@
       spawnRate = 80;
     } else if (level === 4) {
       spawnRate = 75;
+    } else if (level === 5) {
+      spawnRate = 70; // Mars
     } else {
-      spawnRate = 70; // level 5 — Mars
+      spawnRate = 72; // level 6 — Saturn's ring
     }
     spawnTimer++;
-    if (spawnTimer >= spawnRate && !finalBossActive) {
+    if (spawnTimer >= spawnRate * 1.4 && !finalBossActive) {
       spawnTimer = 0;
       const fromR = Math.random() > 0.5;
       const spX = fromR ? (cameraX + GW + 40) : (cameraX - 40);
@@ -1823,15 +2058,22 @@
       enemies.push({ x: spX, y: GROUND_Y - 4, speed: spd, ci: Math.floor(Math.random()*3), v: Math.floor(Math.random()*2) });
     }
 
-    // Coins — different types based on level
-    coinTimer++;
-    if (coinTimer >= 80) {
-      coinTimer = 0;
-      const r = Math.random();
-      let coinType = "gold", coinVal = 1;
-      if (level >= 2 && r < 0.15) { coinType = "gem"; coinVal = 5; }
-      else if (level >= 2 && r < 0.35) { coinType = "silver"; coinVal = 3; }
-      coins.push({ x: cameraX + 50 + Math.random() * (GW - 100), y: GROUND_Y - 30 - Math.random() * 100, type: coinType, val: coinVal });
+    // Coins — placed along the path ahead (runner style). Standing still = no new coins.
+    while (nextCoinX < cameraX + GW + 200) {
+      spawnCoinGroup(nextCoinX);
+      nextCoinX += 380 + Math.random() * 220;
+    }
+    coins = coins.filter(c => c.x > cameraX - 400);
+
+    // Enemies placed along the path ahead, so running never feels empty
+    const enemyGap = [0, 720, 620, 580, 540, 480, 470][level] || 470;
+    while (nextEnemyX < cameraX + GW + 60) {
+      if (!finalBossActive && !levelTransition) {
+        const ex = Math.max(nextEnemyX, cameraX + GW + 40);
+        const espd = -(0.9 + Math.random() * 0.8 + Math.min(level * 0.15, 0.6));
+        enemies.push({ x: ex, y: GROUND_Y - 4, speed: espd, ci: Math.floor(Math.random()*3), v: Math.floor(Math.random()*2) });
+      }
+      nextEnemyX += enemyGap + Math.random() * 260;
     }
 
     // Weapon powerup spawning — only if not yet collected
@@ -1920,7 +2162,7 @@
     }
 
     // Final boss trigger — level 5 at distance threshold
-    if (level === 5 && !finalBossActive && !victoryScreen && maxDistance >= FINAL_BOSS_DIST) {
+    if (level === 5 && !finalBossActive && !victoryScreen && coinsCollected >= FINAL_BOSS_COINS) {
       finalBossActive = true;
       finalBoss = { x: cameraX + GW + 80, y: GROUND_Y - 30, hp: FINAL_BOSS_HP, shootTimer: 0, phase: 0 };
       enemies = []; // clear ALL enemies for clean boss arena
@@ -1956,14 +2198,14 @@
       lasers = lasers.filter(l => {
         if (!finalBoss) return true;
         if (Math.abs(l.x - finalBoss.x) < 45 && Math.abs(l.y - finalBoss.y) < 55) {
-          const dmg = l.rocket ? 5 : l.grenade ? 3 : 1;
+          const dmg = l.rocket ? 5 : l.grenade ? 3 : l.ice ? 2 : 1;
           finalBoss.hp -= dmg;
           explosions.push({ x: finalBoss.x - cameraX + (Math.random()-0.5)*30, y: finalBoss.y - 20 + (Math.random()-0.5)*30, sf: frame });
           if (finalBoss.hp <= 0) {
             explosions.push({ x: finalBoss.x - cameraX, y: finalBoss.y, sf: frame, big: true });
             explosions.push({ x: finalBoss.x - cameraX - 30, y: finalBoss.y - 30, sf: frame, big: true });
             explosions.push({ x: finalBoss.x - cameraX + 30, y: finalBoss.y - 20, sf: frame, big: true });
-            score += 50;
+            victoryBonusLeft = VICTORY_BONUS; victoryFrame = 0; victoryCoinsFx = []; victoryNewRecord = false;
             finalBoss = null;
             finalBossActive = false;
             victoryScreen = true;
@@ -1985,9 +2227,9 @@
           if (lives <= 0) {
             finalScoreEl.textContent = score;
             if (score > highScore) { highScore = score; try { localStorage.setItem("alienParkHighScore", highScore); } catch(e) {} }
-            gameoverTitle.textContent = "נגמר המשחק";
+            gameoverTitle.textContent = "נגמרו החיים";
             livesDisplay.textContent = "🖤🖤🖤🖤🖤";
-            gameoverMsg.textContent = "!כל הכבוד דוידי 🛸";
+            gameoverMsg.textContent = "כמעט! בוא ננסה שוב 💪";
             retryBtn.style.display = "none";
             restartBtn.style.display = "inline-block";
             if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
@@ -2018,9 +2260,9 @@
           invincibleTimer = 90;
           if (lives <= 0) {
             finalScoreEl.textContent = score;
-            gameoverTitle.textContent = "נגמר המשחק";
+            gameoverTitle.textContent = "נגמרו החיים";
             livesDisplay.textContent = "🖤🖤🖤🖤🖤";
-            gameoverMsg.textContent = "!כל הכבוד דוידי 🛸";
+            gameoverMsg.textContent = "כמעט! בוא ננסה שוב 💪";
             retryBtn.style.display = "none";
             restartBtn.style.display = "inline-block";
             if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
@@ -2059,6 +2301,16 @@
         y: GROUND_Y - 40 - Math.random() * 60
       });
     }
+    // Ice beam pickup (level 6)
+    if (level >= 6 && !hasIce && icePickups.length < 1 && frame % 300 === 0) {
+      icePickups.push({ x: cameraX + GW * 0.5 + Math.random() * GW * 0.3, y: GROUND_Y - 40 - Math.random() * 60 });
+    }
+    icePickups = icePickups.filter(ip => {
+      if (Math.abs(p.x - ip.x) < 30 && Math.abs(p.y - ip.y) < 40) {
+        hasIce = true; rebuildWeaponList(); currentWeapon = availableWeapons.indexOf("ice"); return false;
+      }
+      return ip.x > cameraX - 200;
+    });
     grenadePickups = grenadePickups.filter(gp => {
       if (Math.abs(p.x - gp.x) < 30 && Math.abs(p.y - gp.y) < 40) {
         hasGrenade = true; return false;
@@ -2067,7 +2319,7 @@
     });
 
     // Meteors (level 5+) — fall from sky
-    if (level >= 5 && frame % 90 === 0 && !finalBossActive) {
+    if (level === 5 && frame % 90 === 0 && !finalBossActive) {
       meteors.push({
         x: cameraX + 50 + Math.random() * (GW - 100),
         y: -30,
@@ -2142,8 +2394,10 @@
       enemies = enemies.filter(e => {
         const hitDist = e.boss ? 30 : 24;
         const hitDistY = e.boss ? 50 : 30;
+        if (l.ice && l.hits.includes(e)) return true;
         if (Math.abs(l.x - e.x) < hitDist && Math.abs(l.y - e.y) < hitDistY) {
           hit = true;
+          if (l.ice) l.hits.push(e);
           if (e.boss) {
             // Rocket kills boss instantly
             if (l.rocket) {
@@ -2151,8 +2405,8 @@
               explosions.push({ x: e.x - cameraX, y: e.y, sf: frame, big: true });
               return false; // boss dead
             }
-            // Normal/powered laser: reduce HP
-            e.hp--;
+            // Normal/powered laser: reduce HP (ice hits harder)
+            e.hp -= l.ice ? 2 : 1;
             if (e.hp <= 0) {
               score += 10; 
               explosions.push({ x: e.x - cameraX, y: e.y, sf: frame, big: true });
@@ -2169,13 +2423,13 @@
         }
         return true;
       });
-      return !hit;
+      return l.ice ? true : !hit;
     });
 
     // Player-coin — check against player center body
     coins = coins.filter(c => {
       if (Math.abs(p.x - c.x) < 30 && Math.abs(p.y - c.y) < 45) {
-        score += (c.val || 1) * coinMultiplier;  return false;
+        const gain = (c.val || 1) * coinMultiplier; score += gain; coinsCollected += gain; return false;
       }
       return true;
     });
@@ -2185,7 +2439,7 @@
 
     // Distance-based level transition
     const nextLevel = level < 5 ? level + 1 : 0;
-    if (nextLevel > 0 && maxDistance >= LEVEL_DIST[nextLevel - 1] && !levelTransition) {
+    if (nextLevel > 0 && coinsCollected >= LEVEL_COINS[nextLevel] && !levelTransition) {
       levelTransition = true;
       transitionFrame = 0;
     }
@@ -2238,6 +2492,8 @@
       drawHills();
       TREE_DEFS.forEach(t => drawTree(wrapX(t.o, 0.7), t.v));
       drawGround();
+    } else if (level === 6) {
+      drawRingSky(); drawRingGround();
     } else if (level === 5) {
       drawMarsSky(); drawMarsHills(); drawMarsGround();
     } else if (level === 4) {
@@ -2249,7 +2505,8 @@
     platforms.forEach(pl => {
       const sx = pl.x - cameraX;
       if (sx > -100 && sx < GW + 100) {
-        if (level === 5) drawMarsPlatform(sx, pl.y, pl.w);
+        if (level === 6) drawIcePlatform(sx, pl.y, pl.w);
+        else if (level === 5) drawMarsPlatform(sx, pl.y, pl.w);
         else if (level === 4) drawSpacePlatform(sx, pl.y, pl.w);
         else if (level >= 2) drawMoonPlatform(sx, pl.y, pl.w);
         else drawPlatformCloud(sx, pl.y, pl.w);
@@ -2262,6 +2519,7 @@
     heartPickups.forEach(hp => { const sx=hp.x-cameraX; if(sx>-40&&sx<GW+40) drawHeartPickup(sx, hp.y); });
     coinMultPickups.forEach(cm => { const sx=cm.x-cameraX; if(sx>-40&&sx<GW+40) drawCoinMultPickup(sx, cm.y); });
     // Grenade pickups
+    icePickups.forEach(ip => { const sx=ip.x-cameraX; if(sx>-40&&sx<GW+40) drawIcePickup(sx, ip.y); });
     grenadePickups.forEach(gp => { const sx=gp.x-cameraX; if(sx>-40&&sx<GW+40) drawGrenadePickup(sx, gp.y); });
     // Meteors
     meteors.forEach(m => { drawMeteor(m.x - cameraX, m.y, m.size); });
@@ -2269,6 +2527,7 @@
     enemies.forEach(e => {
       const sx = e.x - cameraX;
       if (e.boss) drawBossAlien(sx, e.y, e.hp);
+      else if (level === 6) drawIceEnemy(sx, e.y, e.v);
       else if (level === 5) drawMarsEnemy(sx, e.y, e.v);
       else if (level === 4) drawSpaceEnemy(sx, e.y, e.v);
       else drawEnemy(sx, e.y, e.ci, e.v);
@@ -2278,6 +2537,7 @@
       const sx = l.x - cameraX;
       if (l.rocket) drawRocket(sx, l.y, l.dir);
       else if (l.grenade) drawGrenadeProjectile(sx, l.y, l.dir);
+      else if (l.ice) drawIceBeam(sx, l.y, l.dir);
       else drawLaser(sx, l.y, l.powered, l.buddy);
     });
     explosions.forEach(e => {
@@ -2323,9 +2583,9 @@
     // All lives gone — game over
     if (playerHit) {
       finalScoreEl.textContent = score;
-      gameoverTitle.textContent = "נגמר המשחק";
+      gameoverTitle.textContent = "נגמרו החיים";
       livesDisplay.textContent = "🖤🖤🖤🖤🖤";
-      gameoverMsg.textContent = "!כל הכבוד דוידי 🛸";
+      gameoverMsg.textContent = "כמעט! בוא ננסה שוב 💪";
       retryBtn.style.display = "none";
       restartBtn.style.display = "inline-block";
       if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
