@@ -176,17 +176,20 @@
     <svg class="alien-preview" width="120" height="120" viewBox="-60 -70 120 140" id="preview-svg"></svg>
     <div class="game-title">ALIEN PARK</div>
     <div class="game-subtitle">⭐ !ההרפתקה של דוידי ⭐</div>
-    <div class="game-instructions">חצים לזוז ולקפוץ • רווח לירות</div>
-    <button class="game-btn btn-green" id="start-btn">▶ START GAME</button>
-    <div class="bottom-controls">
-      <span>←→ תזוזה</span><span>↑ קפיצה</span><span>רווח ירייה</span>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center">
+      <button class="game-btn btn-green" id="start-btn">▶ שחקן אחד</button>
+      <button class="game-btn btn-purple" id="start2-btn">👫 שני שחקנים</button>
+    </div>
+    <div class="bottom-controls" style="flex-direction:column;align-items:center;gap:6px;color:#166534;font-weight:600">
+      <span>🟢 שחקן 1: חצים ←→ ↑ · רווח לירייה</span>
+      <span>🔵 שחקן 2: A D לתזוזה · W קפיצה · F לירייה</span>
     </div>
   </div>
   <div id="gameover-screen" class="screen-overlay" style="display:none">
     <div class="gameover-glow"></div>
     <div class="gameover-title" id="gameover-title">נגמרו החיים</div>
     <div class="gameover-score" id="final-score">0</div>
-    <div id="lives-display" style="font-size:1.6rem; margin-bottom:4px;"></div>
+    <div id="lives-display" style="font-size:1.4rem; margin-bottom:6px; color:#fde68a; font-family:'Fredoka',sans-serif; font-weight:600;"></div>
     <div class="gameover-msg" id="gameover-msg">כמעט! בוא ננסה שוב 💪</div>
     <button class="game-btn btn-purple" id="retry-btn" style="display:none">▶ המשך</button>
     <button class="game-btn btn-green" id="restart-btn" style="display:none; margin-top:12px;">↺ שחק שוב</button>
@@ -277,6 +280,7 @@
   let maxDistance, meteors, grenadePickups, hasGrenade;
   let icePickups, hasIce;
   let gamePaused;
+  let twoPlayer = false, player2 = null, gameOverPending = false;
   let coinsCollected, nextCoinX, nextEnemyX;
   let victoryBonusLeft, victoryFrame, victoryCoinsFx, victoryNewRecord;
   // Level is reached by coins collected (never goes down when buying in the shop).
@@ -296,7 +300,9 @@
   const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
   function initState() {
-    player = { x: 200, y: GROUND_Y, vy: 0, right: true, ground: true };
+    player = { x: 200, y: GROUND_Y, vy: 0, right: true, ground: true, down: false, downTimer: 0 };
+    player2 = twoPlayer ? { x: 130, y: GROUND_Y, vy: 0, right: true, ground: true, lives: 5, inv: 0, down: false, downTimer: 0 } : null;
+    gameOverPending = false;
     lasers = []; enemies = []; coins = []; explosions = [];
     score = 0; frame = 0; spawnTimer = 0; coinTimer = 0; cameraX = 0;
     maxDistance = 0;
@@ -358,12 +364,35 @@
     // Generate initial platforms ahead of player
     for (let i = 0; i < 6; i++) {
       spawnPlatform(nextPlatX);
-      nextPlatX += 180 + Math.random() * 160;
+      nextPlatX += level === 6 ? 460 + Math.random() * 220 : 180 + Math.random() * 160;
     }
     keys = {}; 
   }
 
+  function spawnRingTower(wx) {
+    // Floors going up — the low gravity on the ring lets Davidi reach them
+    const tiers = [GROUND_Y - 80, GROUND_Y - 150, GROUND_Y - 220, GROUND_Y - 285];
+    let t = Math.random() < 0.6 ? 0 : 1;
+    const floors = 2 + Math.floor(Math.random() * 2.4); // 2-4 floors, mostly 2-3
+    let x = wx;
+    for (let k = 0; k < floors && t < tiers.length; k++, t++) {
+      const py = tiers[t] - Math.random() * 10;
+      const bar = t >= 2;
+      const pw = bar ? 120 + Math.random() * 40 : 95 + Math.random() * 30;
+      platforms.push({ x, y: py, w: pw, bar });
+      if (t === 3) {
+        coins.push({ x, y: py - 24, type: "gem", val: 5 });
+        coins.push({ x: x - 34, y: py - 22, type: "silver", val: 3 });
+        coins.push({ x: x + 34, y: py - 22, type: "silver", val: 3 });
+      } else {
+        coins.push({ x, y: py - 22, type: t === 2 ? "silver" : "gold", val: t === 2 ? 3 : 1 });
+      }
+      x += (Math.random() < 0.65 ? 1 : -1) * (75 + Math.random() * 45); // zig-zag staircase
+    }
+  }
+
   function spawnPlatform(wx) {
+    if (level === 6) { spawnRingTower(wx); return; }
     const pw = 90 + Math.random() * 40; // width 90-130
     // Tiered heights: most platforms are low (easily reachable from ground),
     // some are medium (reachable from low platforms)
@@ -407,6 +436,7 @@
     level = 6;
     levelTransition = true; transitionFrame = 0;
     enemies = []; enemyProjectiles = []; meteors = []; buddyAliens = [];
+    platforms = platforms.filter(pl => pl.x < cameraX + GW * 0.6); nextPlatX = cameraX + GW * 0.75;
     invincibleTimer = 150;
     nextEnemyX = cameraX + GW + 400;
     // first ice beam shows up right away
@@ -434,7 +464,10 @@
     }
   }
 
-  startBtn.onclick = () => { initState(); showScreen("playing"); gameLoop(); };
+  const start2Btn = document.getElementById("start2-btn");
+  if (isMobile) { start2Btn.style.display = "none"; startBtn.textContent = "▶ התחל משחק"; }
+  startBtn.onclick = () => { twoPlayer = false; initState(); showScreen("playing"); gameLoop(); };
+  start2Btn.onclick = () => { twoPlayer = true; initState(); showScreen("playing"); gameLoop(); };
   retryBtn.onclick = () => { continueGame(); showScreen("playing"); gameLoop(); };
   restartBtn.onclick = () => { initState(); showScreen("playing"); gameLoop(); };
 
@@ -489,8 +522,8 @@
     return names[availableWeapons[currentWeapon]] || "לייזר";
   }
 
-  function shootLaser() {
-    const p = player;
+  function shootLaser(who) {
+    const p = who || player;
     const dir = p.right ? 1 : -1;
     const ox = p.right ? 20 : -20;
     rebuildWeaponList();
@@ -512,7 +545,7 @@
     } else {
       lasers.push({ x: p.x + ox, y: p.y - 20, dir, vy: 0, powered: false });
     }
-    if (buddy) {
+    if (buddy && p === player) {
       const box = p.right ? 15 : -15;
       lasers.push({ x: buddy.x + box, y: buddy.y - 15, dir, vy: 0, powered: false, buddy: true });
     }
@@ -521,9 +554,10 @@
   // Keyboard
   window.addEventListener("keydown", e => {
     if (["ArrowLeft","ArrowRight","ArrowUp"," "].includes(e.key)) e.preventDefault();
-    keys[e.key] = true;
-    if (e.key === " " && state === "playing" && !gamePaused) shootLaser();
-    if ((e.key === "p" || e.key === "P" || e.key === "Escape") && state === "playing") {
+    keys[e.key] = true; keys[e.code] = true; // e.code works on Hebrew keyboard layout too
+    if (e.key === " " && state === "playing" && !gamePaused && !player.down) shootLaser();
+    if (e.code === "KeyF" && !e.repeat && player2 && !player2.down && state === "playing" && !gamePaused && !shopOpen) shootLaser(player2);
+    if ((e.code === "KeyP" || e.key === "Escape") && state === "playing") {
       gamePaused = !gamePaused;
       if (!gamePaused) gameLoop();
     }
@@ -536,7 +570,7 @@
       if (idx >= 0) currentWeapon = idx;
     }
   });
-  window.addEventListener("keyup", e => { keys[e.key] = false; });
+  window.addEventListener("keyup", e => { keys[e.key] = false; keys[e.code] = false; });
 
   // Scroll wheel to cycle weapons (Roblox/Minecraft style)
   window.addEventListener("wheel", e => {
@@ -583,7 +617,7 @@
             score -= item.cost;
             item.bought = true;
             
-            if (key === "extraLife") { lives = Math.min(lives + 1, 7); item.bought = false; }
+            if (key === "extraLife") { lives = Math.min(lives + 1, 7); if (player2) player2.lives = Math.min(player2.lives + 1, 7); item.bought = false; }
             rebuildWeaponList();
             drawShopOverlay(); // redraw shop immediately
           }
@@ -655,7 +689,7 @@
             score -= item.cost;
             item.bought = true;
             
-            if (key === "extraLife") { lives = Math.min(lives + 1, 7); item.bought = false; }
+            if (key === "extraLife") { lives = Math.min(lives + 1, 7); if (player2) player2.lives = Math.min(player2.lives + 1, 7); item.bought = false; }
             rebuildWeaponList();
             drawShopOverlay();
           }
@@ -678,7 +712,7 @@
   });
 
   // Touch controls
-  let shootCooldown = 0;
+  let shootCooldown = 0, shootCooldown2 = 0;
   function setupTouch(id, key, onPress) {
     const el = document.getElementById(id);
     const on = e => { e.preventDefault(); keys[key] = true; el.classList.add("active"); if (onPress) onPress(); };
@@ -868,25 +902,27 @@
   }
 
   // Entity drawing
-  function drawAlien(x,y,right,jump) {
+  function drawAlien(x,y,right,jump,pal) {
+    const B = pal ? pal.body : "#4ade80", D = pal ? pal.dark : "#22c55e", O = pal ? pal.line : "#166534";
+    const moving = pal ? pal.moving : (keys["ArrowLeft"] || keys["ArrowRight"]);
     const f=right?1:-1, jl=jump?30:34;
     const hasSpeed = shopItems.speedBoost.bought;
     // Speed lines when moving with speed boost
-    if (hasSpeed && (keys["ArrowLeft"] || keys["ArrowRight"])) {
+    if (hasSpeed && moving) {
       ctx.globalAlpha = 0.4;
       for (let s = 1; s <= 3; s++) {
         dL(x - f * (10 + s * 12), y - 10 + s * 8, x - f * (22 + s * 12), y - 10 + s * 8, "#fbbf24", 2);
       }
       ctx.globalAlpha = 1;
     }
-    dL(x-6,y+18,x-10,y+jl,"#4ade80",5); dL(x+6,y+18,x+10,y+jl,"#4ade80",5);
+    dL(x-6,y+18,x-10,y+jl,B,5); dL(x+6,y+18,x+10,y+jl,B,5);
     // Shoes — bigger rocket shoes with speed boost
     if (hasSpeed) {
       // Rocket shoes!
       dE(x-12,y+jl+2,9,5,"#ef4444"); dE(x+12,y+jl+2,9,5,"#ef4444");
       dE(x-12,y+jl+1,6,3,"#fbbf24"); dE(x+12,y+jl+1,6,3,"#fbbf24");
       // Flame trail when moving
-      if (keys["ArrowLeft"] || keys["ArrowRight"]) {
+      if (moving) {
         ctx.globalAlpha = 0.6;
         dC(x-12,y+jl+6,3,"#ff6600"); dC(x+12,y+jl+6,3,"#ff6600");
         ctx.globalAlpha = 0.3;
@@ -896,16 +932,16 @@
     } else {
       dE(x-12,y+jl+2,6,3,"#f97316"); dE(x+12,y+jl+2,6,3,"#f97316");
     }
-    dL(x+14*f,y-4,x+24*f,y+(jump?-14:4),"#4ade80",5);
-    dL(x-14*f,y-4,x-22*f,y+(jump?-10:6),"#4ade80",5);
-    dE(x,y,16,20,"#4ade80","#22c55e",2); dE(x,y-26,20,18,"#4ade80","#22c55e",2);
-    dL(x-8,y-42,x-12,y-56,"#22c55e",2); dC(x-12,y-58,4,"#facc15");
-    dL(x+8,y-42,x+12,y-56,"#22c55e",2); dC(x+12,y-58,4,"#facc15");
-    dE(x-7*f,y-28,8,9,"white","#166534",1); dE(x+7*f,y-28,8,9,"white","#166534",1);
+    dL(x+14*f,y-4,x+24*f,y+(jump?-14:4),B,5);
+    dL(x-14*f,y-4,x-22*f,y+(jump?-10:6),B,5);
+    dE(x,y,16,20,B,D,2); dE(x,y-26,20,18,B,D,2);
+    dL(x-8,y-42,x-12,y-56,D,2); dC(x-12,y-58,4,"#facc15");
+    dL(x+8,y-42,x+12,y-56,D,2); dC(x+12,y-58,4,"#facc15");
+    dE(x-7*f,y-28,8,9,"white",O,1); dE(x+7*f,y-28,8,9,"white",O,1);
     dC(x-5*f,y-27,4,"#1e1e1e"); dC(x+9*f,y-27,4,"#1e1e1e");
     dC(x-4*f,y-28,1.5,"white"); dC(x+10*f,y-28,1.5,"white");
     ctx.beginPath(); ctx.moveTo(x-6,y-18); ctx.quadraticCurveTo(x,jump?y-14:y-12,x+6,y-18);
-    ctx.strokeStyle="#166534"; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.strokeStyle=O; ctx.lineWidth=1.5; ctx.stroke();
   }
   function drawEnemy(x,y,ci,v) {
     const c=EC[ci];
@@ -1080,16 +1116,31 @@
     }
   }
 
-  function drawHeartsHUD() {
-    const n = Math.max(5, lives);
-    hudPanel(12, 12, 20 + n * 32, 48, 24);
-    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "24px sans-serif";
-    for (let i = 0; i < n; i++) {
-      const hx = 12 + 10 + 16 + i * 32;
-      if (i < lives) ctx.fillText("❤️", hx, 37);
-      else { ctx.globalAlpha = 0.3; ctx.fillText("🖤", hx, 37); ctx.globalAlpha = 1; }
+  function heartsRow(y, lv, downT, label, col, heart) {
+    const n = Math.max(5, lv);
+    const lw = label ? 34 : 0;
+    hudPanel(12, y, 20 + lw + n * 32, 48, 24);
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    if (label) {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(40, y + 24, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "700 18px 'Fredoka', sans-serif"; ctx.fillText(label, 40, y + 25);
+    }
+    if (downT > 0) {
+      ctx.fillStyle = "#e0f2fe"; ctx.font = "600 17px 'Fredoka', sans-serif";
+      ctx.fillText("🫧 חוזר בעוד " + Math.ceil(downT / 60) + "...", 12 + lw + 10 + n * 16, y + 25);
+    } else {
+      ctx.font = "24px sans-serif";
+      for (let i = 0; i < n; i++) {
+        const hx = 12 + lw + 26 + i * 32;
+        if (i < lv) ctx.fillText(heart, hx, y + 25);
+        else { ctx.globalAlpha = 0.3; ctx.fillText("🖤", hx, y + 25); ctx.globalAlpha = 1; }
+      }
     }
     ctx.restore();
+  }
+  function drawHeartsHUD() {
+    heartsRow(12, lives, player.down ? player.downTimer : 0, twoPlayer ? "1" : null, "#16a34a", twoPlayer ? "💚" : "❤️");
+    if (player2) heartsRow(68, player2.lives, player2.down ? player2.downTimer : 0, "2", "#2563eb", "💙");
   }
 
   // --- BOSS ALIEN (tall purple villain) ---
@@ -1258,10 +1309,11 @@
 
   function drawLevelIndicator() {
     const icons = ["🌳","🌙","👾","🚀","🔴","🪐"];
-    hudPanel(12, 68, 132, 38, 19);
+    const LY = player2 ? 56 : 0;
+    hudPanel(12, 68 + LY, 132, 38, 19);
     ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillStyle = "#fde047"; ctx.font = "700 19px 'Fredoka', sans-serif";
-    ctx.fillText((icons[level - 1] || "") + " שלב " + level, 12 + 66, 88);
+    ctx.fillText((icons[level - 1] || "") + " שלב " + level, 12 + 66, 88 + LY);
     ctx.restore();
   }
 
@@ -1424,70 +1476,130 @@
   }
 
   // === SATURN'S RING (Level 6) ===
+  // The ring is drawn as two non-concentric ellipses so it is wide near the
+  // camera (under Davidi) and thin far away (behind the planet) — fake 3D.
+  function ringGeom() {
+    return { cx: GW * 0.5, cy: 252, rxi: GW * 0.56, ryi: 173, rxo: GW * 0.6, ryo: 269, d: 84 };
+  }
+  function ringEllipseAt(g, t) { // t: 0 = inner edge, 1 = outer edge
+    return { cx: g.cx, cy: g.cy + g.d * t, rx: g.rxi + (g.rxo - g.rxi) * t, ry: g.ryi + (g.ryo - g.ryi) * t };
+  }
+  function ringPoint(g, t, a) {
+    const e = ringEllipseAt(g, t);
+    return [e.cx + e.rx * Math.cos(a), e.cy + e.ry * Math.sin(a)];
+  }
+  const RING_COLS = ["#f6e7c6", "#dcbd8e", "#efd8ae", "#c7a479", "#e9cf9f", "#b9996f", "#f2deb5", "#d2b083", "#e6c995", "#bf9f74"];
+  function drawRingBands(g) {
+    const n = RING_COLS.length;
+    for (let k = 0; k < n; k++) {
+      const e1 = ringEllipseAt(g, k / n), e2 = ringEllipseAt(g, (k + 1) / n);
+      ctx.beginPath();
+      ctx.ellipse(e2.cx, e2.cy, e2.rx, e2.ry, 0, 0, Math.PI * 2);
+      ctx.moveTo(e1.cx + e1.rx, e1.cy);
+      ctx.ellipse(e1.cx, e1.cy, e1.rx, e1.ry, 0, 0, Math.PI * 2);
+      ctx.fillStyle = RING_COLS[k];
+      ctx.fill("evenodd");
+    }
+  }
   function drawRingSky() {
-    const g = ctx.createLinearGradient(0, 0, 0, GH);
-    g.addColorStop(0, "#0b1026"); g.addColorStop(0.6, "#1e1b4b"); g.addColorStop(1, "#3b2a5a");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, GW, GH);
+    const g = ringGeom();
+    const sky = ctx.createLinearGradient(0, 0, 0, GH);
+    sky.addColorStop(0, "#070b1f"); sky.addColorStop(0.55, "#1b1748"); sky.addColorStop(1, "#33285e");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, GW, GH);
     stars.forEach(st => {
       const tw = 0.3 + 0.7 * Math.abs(Math.sin(frame * st.sp + st.b * 10));
-      dC(st.x * GW / 960, st.y, st.s, "#ffffff", tw * 0.8);
+      dC(st.x * GW / 960, st.y * 0.75, st.s, "#ffffff", tw * 0.8);
     });
-    // Giant Saturn behind, drifting very slowly
-    const px = GW * 0.66 - ((cameraX * 0.015) % 80), py = 205, r = 165, tilt = -0.18;
-    const ringRx = r * 2.15, ringRy = r * 0.36;
-    const ringBack = () => {
-      ctx.save(); ctx.translate(px, py); ctx.rotate(tilt);
-      [["rgba(233,213,168,0.55)", 0], ["rgba(201,143,90,0.45)", 16], ["rgba(241,217,168,0.5)", 30]].forEach(([c, d]) => {
-        ctx.strokeStyle = c; ctx.lineWidth = 12;
-        ctx.beginPath(); ctx.ellipse(0, 0, ringRx - d, ringRy - d * 0.17, 0, Math.PI, Math.PI * 2); ctx.stroke();
-      });
-      ctx.restore();
-    };
-    const ringFront = () => {
-      ctx.save(); ctx.translate(px, py); ctx.rotate(tilt);
-      [["rgba(233,213,168,0.8)", 0], ["rgba(201,143,90,0.7)", 16], ["rgba(241,217,168,0.75)", 30]].forEach(([c, d]) => {
-        ctx.strokeStyle = c; ctx.lineWidth = 12;
-        ctx.beginPath(); ctx.ellipse(0, 0, ringRx - d, ringRy - d * 0.17, 0, 0, Math.PI); ctx.stroke();
-      });
-      ctx.restore();
-    };
-    ringBack();
-    // Planet with bands
+    // Whole ring first (its far half will stay behind the planet)
+    drawRingBands(g);
+    // far half is in shadow / farther away
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, GW, g.cy); ctx.clip();
+    ctx.fillStyle = "rgba(20,14,50,0.35)"; ctx.fillRect(0, 0, GW, g.cy);
+    ctx.restore();
+    // Saturn
+    const r = 132, px = g.cx, py = g.cy;
+    const glow = ctx.createRadialGradient(px, py, r * 0.9, px, py, r * 1.5);
+    glow.addColorStop(0, "rgba(253,230,170,0.25)"); glow.addColorStop(1, "rgba(253,230,170,0)");
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(px, py, r * 1.5, 0, Math.PI * 2); ctx.fill();
     ctx.save();
     ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
-    const bands = ["#e8c48a", "#d9a86c", "#f1d9a8", "#c98f5a", "#e3bb85", "#d4a373", "#f0d6a4"];
-    for (let i = 0; i < bands.length; i++) {
-      ctx.fillStyle = bands[i];
-      ctx.fillRect(px - r, py - r + i * (2 * r / bands.length), 2 * r, 2 * r / bands.length + 1);
-    }
-    const shade = ctx.createRadialGradient(px - r * 0.4, py - r * 0.4, r * 0.2, px, py, r);
-    shade.addColorStop(0, "rgba(255,255,255,0.15)"); shade.addColorStop(1, "rgba(30,20,60,0.55)");
+    const bands = ["#efcf98", "#d9a86c", "#f4dcae", "#c98f5a", "#e6be86", "#d4a373", "#f2d8a6", "#cf9b66"];
+    const bh = 2 * r / bands.length;
+    bands.forEach((c, i) => {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.ellipse(px, py - r + i * bh + bh / 2, r * 1.2, bh * 0.62 + 2, Math.sin(frame * 0.003 + i) * 0.02, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    const shade = ctx.createRadialGradient(px - r * 0.45, py - r * 0.45, r * 0.15, px, py, r * 1.05);
+    shade.addColorStop(0, "rgba(255,255,255,0.18)"); shade.addColorStop(1, "rgba(25,15,55,0.6)");
     ctx.fillStyle = shade; ctx.fillRect(px - r, py - r, 2 * r, 2 * r);
     ctx.restore();
-    ringFront();
-    // Floating ring dust (mid layer)
-    for (let i = 0; i < 14; i++) {
-      const dx = wrapX(i * 71, 0.5), dy = 300 + ((i * 37) % 90);
-      dC(dx, dy, 1.5 + (i % 3), "rgba(241,217,168,0.5)");
-    }
   }
   function drawRingGround() {
-    // We run on the ring itself — icy bands
-    const top = GROUND_Y + 28;
-    const stripes = ["#efdcb6", "#c9b3e6", "#e3c897", "#b8a2d9", "#d9b98a", "#a993cc"];
-    const sh = (GH - top) / stripes.length;
-    stripes.forEach((c, i) => { ctx.fillStyle = c; ctx.fillRect(0, top + i * sh, GW, sh + 1); });
-    ctx.fillStyle = "#fff7e6"; ctx.fillRect(0, top, GW, 4);
-    ctx.globalAlpha = 0.35; ctx.fillStyle = "#c4b5fd"; ctx.fillRect(0, top - 6, GW, 6); ctx.globalAlpha = 1;
-    // ice chunks & sparkles moving with the ground
-    [40, 150, 290, 410, 560, 690, 830, 930].forEach((o, i) => {
-      const sx = wrapX(o, 1);
-      ctx.fillStyle = i % 2 ? "#e0f2fe" : "#bae6fd";
-      ctx.beginPath(); ctx.moveTo(sx - 9, top); ctx.lineTo(sx - 3, top - 10); ctx.lineTo(sx + 6, top - 6); ctx.lineTo(sx + 10, top); ctx.fill();
-      const tw = 0.4 + 0.6 * Math.abs(Math.sin(frame * 0.05 + i));
-      dC(wrapX(o + 45, 1), top + 18 + (i % 3) * 14, 2, "#ffffff", tw);
-    });
+    const g = ringGeom();
+    // Near half of the ring passes in front of the planet
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, g.cy, GW, GH - g.cy); ctx.clip();
+    drawRingBands(g);
+    // light falls on the near part, far sides get darker
+    const lit = ctx.createLinearGradient(0, g.cy, 0, GH);
+    lit.addColorStop(0, "rgba(20,14,50,0.35)"); lit.addColorStop(0.55, "rgba(255,255,255,0)"); lit.addColorStop(1, "rgba(255,250,235,0.18)");
+    ctx.fillStyle = lit; ctx.fillRect(0, g.cy, GW, GH - g.cy);
+    // bright rim on the inner edge
+    ctx.strokeStyle = "rgba(255,248,230,0.9)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(g.cx, g.cy, g.rxi, g.ryi, 0, 0, Math.PI); ctx.stroke();
+    // Ring surface moves under the runners: seams and ice chunks travel along the curve
+    const tWalk = 0.3;
+    const rWalk = g.rxi + (g.rxo - g.rxi) * tWalk;
+    const off = cameraX / rWalk;
+    const N = 56;
+    for (let i = 0; i < N; i++) {
+      let a = ((i / N) * Math.PI * 2 + off) % (Math.PI * 2);
+      if (a < 0) a += Math.PI * 2;
+      const sn = Math.sin(a);
+      if (sn < 0.06) continue;
+      // seam across the band
+      const [x1, y1] = ringPoint(g, 0, a), [x2, y2] = ringPoint(g, 1, a);
+      ctx.strokeStyle = `rgba(110,80,50,${0.07 * sn})`; ctx.lineWidth = 1 + sn;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      // ice chunk lying on the ring
+      const t = 0.12 + ((i * 37) % 10) / 10 * 0.8;
+      const [cx2, cy2] = ringPoint(g, t, a + 0.04);
+      const sz = (2.5 + 9 * sn) * (0.7 + 0.5 * t);
+      ctx.fillStyle = i % 3 ? "#e0f2fe" : "#a5d8f3";
+      ctx.beginPath();
+      ctx.moveTo(cx2 - sz, cy2); ctx.lineTo(cx2 - sz * 0.4, cy2 - sz * 0.9);
+      ctx.lineTo(cx2 + sz * 0.6, cy2 - sz * 0.6); ctx.lineTo(cx2 + sz, cy2); ctx.closePath(); ctx.fill();
+      if (i % 4 === 0) {
+        const tw = 0.4 + 0.6 * Math.abs(Math.sin(frame * 0.06 + i));
+        dC(cx2 + sz * 0.2, cy2 - sz * 1.2, 1.2 + sn, "#ffffff", tw);
+      }
+    }
+    ctx.restore();
   }
+  // Glowing crystal bar — the higher "floors" on the ring
+  function drawCrystalBar(x, y, w) {
+    const hw = w / 2;
+    ctx.save();
+    ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 16;
+    const gr = ctx.createLinearGradient(0, y - 6, 0, y + 10);
+    gr.addColorStop(0, "#e0f2fe"); gr.addColorStop(0.5, "#67e8f9"); gr.addColorStop(1, "#8b5cf6");
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.roundRect(x - hw, y - 6, w, 14, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.roundRect(x - hw + 8, y - 4, w - 16, 3, 2); ctx.fill();
+    // hanging crystals
+    ctx.fillStyle = "#c4b5fd";
+    for (let k = -1; k <= 1; k++) {
+      const cx3 = x + k * hw * 0.55, len = 10 + (k === 0 ? 8 : 0);
+      ctx.beginPath(); ctx.moveTo(cx3 - 5, y + 8); ctx.lineTo(cx3, y + 8 + len); ctx.lineTo(cx3 + 5, y + 8); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawIcePlatform(x, y, w) {
     const hw = w / 2;
     ctx.fillStyle = "#7dd3fc";
@@ -1752,13 +1864,14 @@
   function drawShieldIndicator() {
     if (shieldTimer <= 0) return;
     const pct = shieldTimer / SHIELD_DURATION;
-    hudPanel(12, 114, 160, 36, 18);
+    const LY = player2 ? 56 : 0;
+    hudPanel(12, 114 + LY, 160, 36, 18);
     ctx.save(); ctx.textAlign = "right"; ctx.textBaseline = "middle";
     ctx.fillStyle = "#fff"; ctx.font = "600 14px 'Fredoka', sans-serif";
-    ctx.fillText("🛡️ מגן", 12 + 150, 132);
+    ctx.fillText("🛡️ מגן", 12 + 150, 132 + LY);
     ctx.restore();
-    dR(24, 127, 66, 10, "rgba(255,255,255,0.15)", 5);
-    dR(24, 127, 66 * pct, 10, pct > 0.3 ? "#60a5fa" : "#f97316", 5);
+    dR(24, 127 + LY, 66, 10, "rgba(255,255,255,0.15)", 5);
+    dR(24, 127 + LY, 66 * pct, 10, pct > 0.3 ? "#60a5fa" : "#f97316", 5);
   }
   function drawPlatformCloud(x, y, w) {
     // A fluffy solid-looking cloud platform
@@ -1938,6 +2051,103 @@
     }
   }
 
+  // ===== Players (1 or 2) =====
+  const P2_PAL = { body: "#60a5fa", dark: "#3b82f6", line: "#1e3a8a" };
+  function activePlayers() {
+    const a = [];
+    if (!player.down) a.push(player);
+    if (player2 && !player2.down) a.push(player2);
+    return a;
+  }
+  function touchWho(x, y, dx, dy) {
+    for (const pl of activePlayers()) if (Math.abs(pl.x - x) < dx && Math.abs(pl.y - y) < dy) return pl;
+    return null;
+  }
+  function isInv(pl) { return shieldTimer > 0 || (pl === player ? invincibleTimer > 0 : pl.inv > 0); }
+  function knockOut(pl) {
+    if (!twoPlayer) { gameOverPending = true; return; }
+    pl.down = true; pl.downTimer = 300; // 5 seconds in a bubble
+    if (player.down && player2.down) gameOverPending = true;
+  }
+  function hurtPlayer(pl) {
+    if (isInv(pl)) return false;
+    explosions.push({ x: pl.x - cameraX, y: pl.y, sf: frame });
+    hitFlashTimer = 60;
+    if (pl === player) { lives--; invincibleTimer = 90; if (lives <= 0) knockOut(pl); }
+    else { pl.lives--; pl.inv = 90; if (pl.lives <= 0) knockOut(pl); }
+    return true;
+  }
+  function updateDownPlayers() {
+    if (!player2) return;
+    if (player2.inv > 0) player2.inv--;
+    [player, player2].forEach(pl => {
+      if (!pl.down) return;
+      const other = pl === player ? player2 : player;
+      pl.x += (other.x - 70 - pl.x) * 0.08;
+      pl.y += (other.y - 90 - pl.y) * 0.08;
+      pl.vy = 0;
+      if (other.down) return;
+      pl.downTimer--;
+      if (pl.downTimer <= 0) {
+        pl.down = false; pl.x = other.x - 40; pl.y = other.y; pl.vy = 0;
+        if (pl === player) { lives = 3; invincibleTimer = 120; } else { pl.lives = 3; pl.inv = 120; }
+      }
+    });
+  }
+  function movePlayer(p, c) {
+    const baseSpd = shopItems.speedBoost.bought ? MOVE_SPEED * 1.4 : MOVE_SPEED;
+    const baseAir = shopItems.speedBoost.bought ? AIR_MOVE_SPEED * 1.3 : AIR_MOVE_SPEED;
+    const spd = p.ground ? baseSpd : baseAir;
+    if (c.left) { p.x -= spd; p.right = false; }
+    if (c.right) { p.x += spd; p.right = true; }
+    const baseJump = level === 6 ? -12 : JUMP_FORCE;
+    const jf = shopItems.superJump.bought ? baseJump * 1.25 : baseJump;
+    if (c.jump && p.ground) { p.vy = jf; p.ground = false; }
+    p.vy += (level === 6 ? 0.36 : GRAVITY); p.y += p.vy;
+    if (p.y >= GROUND_Y) { p.y = GROUND_Y; p.vy = 0; p.ground = true; }
+    else if (p.vy > 0) p.ground = false;
+    if (p.vy >= 0) {
+      for (const pl of platforms) {
+        const hw = pl.w / 2;
+        const feetY = p.y + 36;
+        const prevFeetY = feetY - p.vy;
+        if (p.x > pl.x - hw - 10 && p.x < pl.x + hw + 10 && prevFeetY <= pl.y + 6 && feetY >= pl.y - 2) {
+          p.y = pl.y - 36; p.vy = 0; p.ground = true;
+        }
+      }
+    }
+  }
+  function drawPlayerSprite(pl, pal, inv) {
+    const sx = pl.x - cameraX;
+    if (pl.down) {
+      ctx.save(); ctx.translate(sx, pl.y - 10); ctx.scale(0.7, 0.7);
+      drawAlien(0, 10, true, true, pal);
+      ctx.restore();
+      ctx.save();
+      const r = 44 + Math.sin(frame * 0.1) * 2;
+      const g = ctx.createRadialGradient(sx - 12, pl.y - 26, 4, sx, pl.y - 10, r);
+      g.addColorStop(0, "rgba(255,255,255,0.35)"); g.addColorStop(0.7, "rgba(186,230,253,0.12)"); g.addColorStop(1, "rgba(125,211,252,0.35)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, pl.y - 10, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = "700 22px 'Fredoka', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 4;
+      ctx.fillText(Math.ceil(pl.downTimer / 60), sx, pl.y - 66);
+      ctx.restore();
+      return;
+    }
+    drawAlien(sx, pl.y, pl.right, !pl.ground, pal);
+    if (twoPlayer) {
+      ctx.save();
+      ctx.fillStyle = pal ? "#2563eb" : "#16a34a";
+      ctx.beginPath(); ctx.arc(sx, pl.y - 76, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = "700 14px 'Fredoka', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(pal ? "2" : "1", sx, pl.y - 75);
+      ctx.restore();
+    }
+    if (pal && inv > 0 && Math.floor(frame / 4) % 2 === 0) { ctx.globalAlpha = 0.3; dC(sx, pl.y - 10, 30, "white"); ctx.globalAlpha = 1; }
+  }
+
   function gameLoop() {
     if (state !== "playing") return;
     if (victoryScreen) {
@@ -1956,56 +2166,40 @@
     frame++;
     const p = player;
 
-    // Input — apply speed boost if bought
-    const baseSpd = shopItems.speedBoost.bought ? MOVE_SPEED * 1.4 : MOVE_SPEED;
-    const baseAir = shopItems.speedBoost.bought ? AIR_MOVE_SPEED * 1.3 : AIR_MOVE_SPEED;
-    const spd = p.ground ? baseSpd : baseAir;
-    if (keys["ArrowLeft"]) { p.x -= spd; p.right = false; }
-    if (keys["ArrowRight"]) { p.x += spd; p.right = true; }
-    // Apply super jump if bought
-    const baseJump = level === 6 ? -12 : JUMP_FORCE;
-    const jf = shopItems.superJump.bought ? baseJump * 1.25 : baseJump;
-    if (keys["ArrowUp"] && p.ground) { p.vy = jf; p.ground = false; }
-
-    // Physics
-    p.vy += (level === 6 ? 0.36 : GRAVITY); p.y += p.vy;
-    if (p.y >= GROUND_Y) { p.y = GROUND_Y; p.vy = 0; p.ground = true; }
-
-    // Cloud platform collision — only when falling down
-    if (p.vy >= 0) {
-      for (const pl of platforms) {
-        const hw = pl.w / 2;
-        // Check if player feet are at platform level and within horizontal bounds
-        const feetY = p.y + 36; // feet position
-        const prevFeetY = feetY - p.vy;
-        if (p.x > pl.x - hw - 10 && p.x < pl.x + hw + 10 &&
-            prevFeetY <= pl.y + 6 && feetY >= pl.y - 2) {
-          p.y = pl.y - 36; // land on platform
-          p.vy = 0;
-          p.ground = true;
-        }
-      }
-    }
+    // Movement for each player
+    if (!player.down) movePlayer(player, { left: keys["ArrowLeft"], right: keys["ArrowRight"], jump: keys["ArrowUp"] });
+    if (player2 && !player2.down) movePlayer(player2, { left: keys["KeyA"], right: keys["KeyD"], jump: keys["KeyW"] });
+    updateDownPlayers();
 
     // Spawn new platforms ahead as player moves
     while (nextPlatX < cameraX + GW + 400) {
       spawnPlatform(nextPlatX);
-      nextPlatX += 180 + Math.random() * 160;
+      nextPlatX += level === 6 ? 460 + Math.random() * 220 : 180 + Math.random() * 160;
     }
     // Remove platforms far behind camera
     platforms = platforms.filter(pl => pl.x > cameraX - 300);
 
     // Camera smooth follow
-    const targetCam = p.x - GW * 0.35;
+    const leader = (player2 && !player2.down && (player.down || player2.x > player.x)) ? player2 : player;
+    const targetCam = leader.x - GW * 0.35;
     cameraX += (targetCam - cameraX) * 0.1;
+    if (player2) [player, player2].forEach(pl => {
+      if (pl.down) return;
+      if (pl.x < cameraX + 24) pl.x = cameraX + 24;
+      if (pl.x > cameraX + GW - 24) pl.x = cameraX + GW - 24;
+    });
 
     const psx = p.x - cameraX; // player screen x
 
     // Mobile auto-fire
-    if (keys[" "] && state === "playing") {
+    if (keys[" "] && state === "playing" && !player.down) {
       shootCooldown++;
       if (shootCooldown >= 14) { shootCooldown = 0; shootLaser(); }
     } else { shootCooldown = 0; }
+    if (player2 && !player2.down && keys["KeyF"]) {
+      shootCooldown2++;
+      if (shootCooldown2 >= 14) { shootCooldown2 = 0; shootLaser(player2); }
+    } else { shootCooldown2 = 0; }
 
     // Lasers
     lasers = lasers.filter(l => {
@@ -2089,7 +2283,7 @@
 
     // Player-powerup collision
     powerups = powerups.filter(pw => {
-      if (Math.abs(p.x - pw.x) < 30 && Math.abs(p.y - pw.y) < 40) {
+      if (touchWho(pw.x, pw.y, 30, 40)) {
         weaponLevel = 1;
         return false;
       }
@@ -2112,7 +2306,7 @@
 
     // Player-buddy collision — pick up buddy
     buddyAliens = buddyAliens.filter(ba => {
-      if (Math.abs(p.x - ba.x) < 35 && Math.abs(p.y - ba.y) < 40) {
+      if (touchWho(ba.x, ba.y, 35, 40)) {
         buddy = { x: p.x - 30, y: p.y }; // start following
         shieldTimer = SHIELD_DURATION;
         return false;
@@ -2173,7 +2367,7 @@
     // Final boss behavior
     if (finalBossActive && finalBoss) {
       // Move toward player — close enough to fight
-      const targetX = player.x + 180;
+      const targetX = (activePlayers()[0] || player).x + 180;
       const dx = targetX - finalBoss.x;
       finalBoss.x += dx * 0.03; // faster approach
       // Keep boss on screen
@@ -2184,7 +2378,7 @@
       const shootRate = finalBoss.hp <= FINAL_BOSS_HP * 0.4 ? 40 : finalBoss.hp <= FINAL_BOSS_HP * 0.7 ? 60 : 80;
       if (finalBoss.shootTimer >= shootRate) {
         finalBoss.shootTimer = 0;
-        const pdx = player.x - finalBoss.x;
+        const pdx = (activePlayers()[0] || player).x - finalBoss.x;
         const projDir = pdx > 0 ? 1 : -1;
         enemyProjectiles.push({ x: finalBoss.x, y: finalBoss.y - 20, vx: projDir * 5, vy: -2 });
         if (finalBoss.hp <= FINAL_BOSS_HP * 0.7) {
@@ -2219,24 +2413,7 @@
         return true;
       });
       // Player collision with final boss
-      if (finalBoss && Math.abs(player.x - finalBoss.x) < 35 && Math.abs(player.y - finalBoss.y) < 50) {
-        if (shieldTimer <= 0 && invincibleTimer <= 0) {
-          lives--;
-          hitFlashTimer = 60;
-          invincibleTimer = 90;
-          if (lives <= 0) {
-            finalScoreEl.textContent = score;
-            if (score > highScore) { highScore = score; try { localStorage.setItem("alienParkHighScore", highScore); } catch(e) {} }
-            gameoverTitle.textContent = "נגמרו החיים";
-            livesDisplay.textContent = "🖤🖤🖤🖤🖤";
-            gameoverMsg.textContent = "כמעט! בוא ננסה שוב 💪";
-            retryBtn.style.display = "none";
-            restartBtn.style.display = "inline-block";
-            if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
-            return;
-          }
-        }
-      }
+      if (finalBoss) { const who = touchWho(finalBoss.x, finalBoss.y, 35, 50); if (who) hurtPlayer(who); }
     }
 
     // Enemy projectiles movement
@@ -2251,27 +2428,8 @@
     // Player hit by enemy projectile
     for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
       const ep = enemyProjectiles[i];
-      if (Math.abs(p.x - ep.x) < 20 && Math.abs(p.y - ep.y) < 30) {
-        if (shieldTimer <= 0 && invincibleTimer <= 0) {
-          enemyProjectiles.splice(i, 1);
-          lives--;
-          explosions.push({ x: p.x - cameraX, y: p.y, sf: frame });
-          hitFlashTimer = 60;
-          invincibleTimer = 90;
-          if (lives <= 0) {
-            finalScoreEl.textContent = score;
-            gameoverTitle.textContent = "נגמרו החיים";
-            livesDisplay.textContent = "🖤🖤🖤🖤🖤";
-            gameoverMsg.textContent = "כמעט! בוא ננסה שוב 💪";
-            retryBtn.style.display = "none";
-            restartBtn.style.display = "inline-block";
-            if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
-            return;
-          }
-        } else {
-          enemyProjectiles.splice(i, 1);
-        }
-      }
+      const who = touchWho(ep.x, ep.y, 20, 30);
+      if (who) { enemyProjectiles.splice(i, 1); hurtPlayer(who); }
     }
 
     // Rocket pickup spawning (level 3, if not collected) — appears quickly
@@ -2286,7 +2444,7 @@
 
     // Player-rocket pickup
     rocketPickups = rocketPickups.filter(rp => {
-      if (Math.abs(p.x - rp.x) < 30 && Math.abs(p.y - rp.y) < 40) {
+      if (touchWho(rp.x, rp.y, 30, 40)) {
         hasRocket = true;
         return false;
       }
@@ -2306,13 +2464,13 @@
       icePickups.push({ x: cameraX + GW * 0.5 + Math.random() * GW * 0.3, y: GROUND_Y - 40 - Math.random() * 60 });
     }
     icePickups = icePickups.filter(ip => {
-      if (Math.abs(p.x - ip.x) < 30 && Math.abs(p.y - ip.y) < 40) {
+      if (touchWho(ip.x, ip.y, 30, 40)) {
         hasIce = true; rebuildWeaponList(); currentWeapon = availableWeapons.indexOf("ice"); return false;
       }
       return ip.x > cameraX - 200;
     });
     grenadePickups = grenadePickups.filter(gp => {
-      if (Math.abs(p.x - gp.x) < 30 && Math.abs(p.y - gp.y) < 40) {
+      if (touchWho(gp.x, gp.y, 30, 40)) {
         hasGrenade = true; return false;
       }
       return gp.x > cameraX - 200;
@@ -2337,18 +2495,12 @@
         return false;
       }
       // Hit player
-      if (shieldTimer <= 0 && invincibleTimer <= 0 && Math.abs(p.x - m.x) < m.size + 10 && Math.abs(p.y - m.y) < m.size + 15) {
-        lives--;
-        hitFlashTimer = 60; invincibleTimer = 90;
-        explosions.push({ x: p.x - cameraX, y: p.y, sf: frame });
-        if (lives <= 0) { playerHit = true; }
-        return false;
-      }
+      { const who = touchWho(m.x, m.y, m.size + 10, m.size + 15); if (who && hurtPlayer(who)) return false; }
       return true;
     });
 
     // Heart pickup spawning — every ~1000 frames, if lives < 5
-    if (lives < 5 && frame % 1000 === 0 && Math.random() < 0.5 && heartPickups.length < 1) {
+    if ((lives < 5 || (player2 && player2.lives < 5)) && frame % 1000 === 0 && Math.random() < 0.5 && heartPickups.length < 1) {
       heartPickups.push({
         x: cameraX + GW * 0.3 + Math.random() * GW * 0.4,
         y: GROUND_Y - 40 - Math.random() * 80
@@ -2357,8 +2509,9 @@
 
     // Player-heart pickup
     heartPickups = heartPickups.filter(hp => {
-      if (Math.abs(p.x - hp.x) < 28 && Math.abs(p.y - hp.y) < 38) {
-        lives = Math.min(lives + 1, 5);
+      const who = touchWho(hp.x, hp.y, 28, 38);
+      if (who) {
+        if (who === player) lives = Math.min(lives + 1, 5); else who.lives = Math.min(who.lives + 1, 5);
         return false;
       }
       return hp.x > cameraX - 200;
@@ -2374,7 +2527,7 @@
 
     // Player-coinMult pickup
     coinMultPickups = coinMultPickups.filter(cm => {
-      if (Math.abs(p.x - cm.x) < 28 && Math.abs(p.y - cm.y) < 38) {
+      if (touchWho(cm.x, cm.y, 28, 38)) {
         coinMultiplier = 2;
         coinMultTimer = 900; // 15 seconds
         return false;
@@ -2428,14 +2581,14 @@
 
     // Player-coin — check against player center body
     coins = coins.filter(c => {
-      if (Math.abs(p.x - c.x) < 30 && Math.abs(p.y - c.y) < 45) {
+      if (touchWho(c.x, c.y, 30, 45)) {
         const gain = (c.val || 1) * coinMultiplier; score += gain; coinsCollected += gain; return false;
       }
       return true;
     });
 
     // Track max distance (only counts forward movement)
-    if (p.x > maxDistance) maxDistance = p.x;
+    if (leader.x > maxDistance) maxDistance = leader.x;
 
     // Distance-based level transition
     const nextLevel = level < 5 ? level + 1 : 0;
@@ -2458,21 +2611,14 @@
     // Player-enemy
     for (let i = enemies.length - 1; i >= 0; i--) {
       const e = enemies[i];
-      if (Math.abs(p.x - e.x) < 28 && Math.abs(p.y - e.y) < 36) {
-        if (shieldTimer > 0) {
-          score += 3; 
-          explosions.push({ x: e.x - cameraX, y: e.y, sf: frame });
-          enemies.splice(i, 1);
-        } else if (invincibleTimer > 0) {
-          // Still invincible from recent hit, ignore
-        } else {
-          lives--;
-          explosions.push({ x: p.x - cameraX, y: p.y, sf: frame });
-          enemies.splice(i, 1);
-          hitFlashTimer = 60; // show "!אאוץ׳" for 1 second
-          invincibleTimer = 90; // 1.5 sec invincibility
-          if (lives <= 0) { playerHit = true; break; }
-        }
+      const who = touchWho(e.x, e.y, 28, 36);
+      if (!who) continue;
+      if (shieldTimer > 0) {
+        score += 3;
+        explosions.push({ x: e.x - cameraX, y: e.y, sf: frame });
+        enemies.splice(i, 1);
+      } else if (hurtPlayer(who)) {
+        enemies.splice(i, 1);
       }
     }
 
@@ -2505,7 +2651,7 @@
     platforms.forEach(pl => {
       const sx = pl.x - cameraX;
       if (sx > -100 && sx < GW + 100) {
-        if (level === 6) drawIcePlatform(sx, pl.y, pl.w);
+        if (level === 6) { if (pl.bar) drawCrystalBar(sx, pl.y, pl.w); else drawIcePlatform(sx, pl.y, pl.w); }
         else if (level === 5) drawMarsPlatform(sx, pl.y, pl.w);
         else if (level === 4) drawSpacePlatform(sx, pl.y, pl.w);
         else if (level >= 2) drawMoonPlatform(sx, pl.y, pl.w);
@@ -2544,8 +2690,12 @@
       if (e.big) drawBigExplosion(e);
       else drawExplosion(e);
     });
-    if (shieldTimer > 0) drawShieldBubble(psx, p.y);
-    drawAlien(psx, p.y, p.right, !p.ground);
+    if (player2) {
+      if (shieldTimer > 0 && !player2.down) drawShieldBubble(player2.x - cameraX, player2.y);
+      drawPlayerSprite(player2, Object.assign({ moving: keys["KeyA"] || keys["KeyD"] }, P2_PAL), player2.inv);
+    }
+    if (shieldTimer > 0 && !player.down) drawShieldBubble(psx, p.y);
+    drawPlayerSprite(player, null, invincibleTimer);
     if (buddy) drawBuddyAlien(buddy.x - cameraX, buddy.y, p.right);
     // Final boss
     if (finalBossActive && finalBoss) drawFinalBoss(finalBoss);
@@ -2573,7 +2723,7 @@
     }
 
     // Player blinks when invincible (already drawn above, re-draw with blink)
-    if (invincibleTimer > 0 && Math.floor(frame / 4) % 2 === 0) {
+    if (invincibleTimer > 0 && !player.down && Math.floor(frame / 4) % 2 === 0) {
       // Draw white flash over player position
       ctx.globalAlpha = 0.3;
       dC(psx, p.y - 10, 30, "white");
@@ -2581,11 +2731,11 @@
     }
 
     // All lives gone — game over
-    if (playerHit) {
+    if (playerHit || gameOverPending) {
       finalScoreEl.textContent = score;
       gameoverTitle.textContent = "נגמרו החיים";
       livesDisplay.textContent = "🖤🖤🖤🖤🖤";
-      gameoverMsg.textContent = "כמעט! בוא ננסה שוב 💪";
+      gameoverMsg.textContent = twoPlayer ? "כמעט! בואו ננסה שוב 💪" : "כמעט! בוא ננסה שוב 💪";
       retryBtn.style.display = "none";
       restartBtn.style.display = "inline-block";
       if(score>highScore){highScore=score;try{localStorage.setItem("alienParkHighScore",highScore)}catch(e){}} showScreen("gameover");
